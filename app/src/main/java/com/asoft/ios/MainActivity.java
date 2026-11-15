@@ -634,9 +634,7 @@ public class MainActivity extends Activity {
         if (os == Guest.IOS26) {
             m.getMenu().add(0, 2, 0, "Screen: " + (Guest.scale26(this) == 2 ? "2x (faster)" : "3x (sharp)"));
         }
-        if (os != Guest.IOS16) {
-            m.getMenu().add(0, 3, 0, "Memory: " + Guest.ramMiB(this, os) / 1024 + " GB");
-        }
+        m.getMenu().add(0, 3, 0, "Memory: " + Guest.ramMiB(this, os) / 1024 + " GB");
         CrashReport.Record crash = CrashReport.latestFor(this, os);     // (three small files)
         if (crash != null) {
             m.getMenu().add(0, 6, 0, "Report the last crash…");
@@ -1072,13 +1070,13 @@ public class MainActivity extends Activity {
      * size takes effect at the next full start.
      */
     private void chooseRam(int os) {
-        int[] ch = os == Guest.WATCH ? Guest.RAM_CHOICES_WATCH : Guest.RAM_CHOICES_26;
+        int[] ch = Guest.ramChoices(os);
         int now = Guest.ramMiB(this, os), def = Guest.ramDefault(this, os);
         String[] names = new String[ch.length];
         int pick = 0;
         for (int i = 0; i < ch.length; i++) {
             names[i] = ch[i] / 1024 + " GB" + (ch[i] == def ? " (default for this phone)"
-                    : ch[i] > Guest.RAM_TIGHT ? " (Android may close iOS)" : "");
+                    : (os == Guest.IOS16 ? ch[i] > def : ch[i] > Guest.RAM_TIGHT) ? " (Android may close iOS)" : "");
             if (ch[i] == now) {
                 pick = i;
             }
@@ -1087,7 +1085,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 // (a message would hide the list: the explanation is in the title and the toast)
                 .setTitle(String.format(java.util.Locale.ROOT, "%s's memory (this phone: %.1f GB; less leaves Android more)",
-                        os == Guest.WATCH ? "watchOS" : "iOS 26", GpuCheck.ram(this) / 1e9))
+                        systemName(os), GpuCheck.ram(this) / 1e9))
                 .setSingleChoiceItems(names, pick, (d, w) -> chosen[0] = w)
                 .setPositiveButton("Use", (d, w) -> {
                     Runnable use = () -> {
@@ -1130,7 +1128,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             boolean up = Guest.running() && Guest.os(this) == os;
             Guest.Snap quick = up || Guest.userDisk(this, os).exists() ? Guest.newestQuick(Guest.snapshots(this, os)) : null;
-            String name = os == Guest.WATCH ? "watchOS" : "iOS 26";
+            String name = systemName(os);
             boolean other = quick != null && Guest.otherHardware(this, os, quick.tag);
             String text = quick != null && !other && !up
                     ? "Your save of " + ScreenActivity.when(quick) + " has this size: the next start goes on from it ("
@@ -1384,7 +1382,9 @@ public class MainActivity extends Activity {
                 info = "";
             } else if (back != null) {
                 st = "Turned off";
-                info = "Boots next time: 2 to 4 min.";
+                info = Guest.otherHardware(this, Guest.IOS16, back.tag)
+                        ? "Boots with " + Guest.ramMiB(this, Guest.IOS16) / 1024 + " GB next time: 2 to 4 min."
+                        : "Boots next time: 2 to 4 min.";
             } else if (quick != null) {
                 st = "Ready";
                 info = "Continues from " + nice(quick.date) + ".";

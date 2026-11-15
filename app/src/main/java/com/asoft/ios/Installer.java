@@ -54,18 +54,22 @@ final class Installer {
 
     /**
      * The phone's boot-args: the bundle's, with this phone's time zone, region and clock, and
-     * @cpus (QEMU's -smp, CpuPlan). Done at every boot (not for a loaded save: its RAM is already
+     * @cpus (QEMU's -smp, CpuPlan) and maxmem (@ramMiB: the guest's memory for this boot, when it is
+     * below what the payload's kernel manages). Done at every boot (not for a loaded save: its RAM is already
      * set up), so a changed setting counts.
      */
-    static void prepareBoot(Context c, File dir, int cpus) throws IOException {
+    static void prepareBoot(Context c, File dir, int cpus, int ramMiB) throws IOException {
         File payload = new File(dir, "payload.bin");
         if (!payload.isFile() || !dir.canWrite()) {
             return;                     // a test folder with a ready ram.bin
         }
-        String base = GuestImage.cmdline(Files.readAllBytes(payload.toPath()));
+        byte[] bytes = Files.readAllBytes(payload.toPath());
+        String base = GuestImage.cmdline(bytes);
         String region = java.util.Locale.getDefault().getCountry();
-        GuestImage.write(payload, GuestImage.withCpus(GuestImage.withLocale(base, java.util.TimeZone.getDefault().getID(),
-                region, android.text.format.DateFormat.is24HourFormat(c)), cpus), dir);
+        int maxMem = ramMiB > 0 && (long) ramMiB << 20 < GuestImage.memSize(bytes) ? ramMiB : 0;
+        GuestImage.write(payload, GuestImage.withMaxMem(GuestImage.withCpus(GuestImage.withLocale(base,
+                java.util.TimeZone.getDefault().getID(), region, android.text.format.DateFormat.is24HourFormat(c)), cpus),
+                maxMem), dir);
     }
 
     /** Something an import would delete: an installed iOS 16, or its iPhone's own disk and saves. */
@@ -268,7 +272,7 @@ final class Installer {
         if (GuestImage.softKeyboard(k)) {
             Files.write(payload.toPath(), k);
         }
-        prepareBoot(c, part, CpuPlan.forThisPhone(c).smp);  // fails here, not at the first start, if the kernel does not fit
+        prepareBoot(c, part, CpuPlan.forThisPhone(c).smp, 0);  // fails here, not at the first start, if the kernel does not fit
     }
 
     /** A kernel without xnu 0103 keeps the time a save was made in until it boots again. */

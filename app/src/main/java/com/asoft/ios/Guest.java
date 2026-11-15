@@ -508,12 +508,19 @@ final class Guest {
     }
 
     /**
-     * The guest's RAM in MiB, per OS, chosen in its menu on the home screen (iOS 26 3, 4 or 6 GiB; the watch 2 or 3 GiB). Unchosen
+     * The guest's RAM in MiB, per OS, chosen in its menu on the home screen (iOS 26 3, 4 or 6 GiB; the watch 2 or 3 GiB; iOS 16
+     * 2, 3 or 4 GiB of the 7 GiB QEMU maps: XNU's maxmem, default by LowMemory.defaultGuestMiB). Unchosen
      * (LowMemory.defaultGuestMiB): iOS 26 4 GiB on a phone from LowMemory.IOS26_3G_UP_TO (10 GB), else 3 GiB; the watch 3 GiB from 10 GB, else 2 GiB (2 GiB slowed the watch's
      * cold Settings from 5.5 to 27 s but left ~1.3 GB more to Android, WATCHOS.md). A save always loads with
      * the RAM it was made with (savedRam), so a new size takes effect at the next full start.
      */
-    static final int[] RAM_CHOICES_26 = {3072, 4096, 6144}, RAM_CHOICES_WATCH = {2048, 3072};
+    static final int[] RAM_CHOICES_26 = {3072, 4096, 6144}, RAM_CHOICES_WATCH = {2048, 3072},
+            RAM_CHOICES_16 = {2048, 3072, 4096};
+
+    /** The memory sizes (MiB) offered for @forOs. */
+    static int[] ramChoices(int forOs) {
+        return forOs == IOS16 ? RAM_CHOICES_16 : forOs == WATCH ? RAM_CHOICES_WATCH : RAM_CHOICES_26;
+    }
     /** Above this Android has so little left that it may close the guest: MainActivity.chooseRam warns. */
     static final int RAM_TIGHT = 4096;
     // 6 GB needs qemu-sptm asoft-android 6c733cf or later: from 5 GB of RAM vresearch's framebuffer goes past the end
@@ -524,12 +531,12 @@ final class Guest {
     }
 
     private static String ramKey(int forOs) {
-        return forOs == WATCH ? "watch-ram" : "ios26-ram";
+        return forOs == WATCH ? "watch-ram" : forOs == IOS16 ? "ios16-ram" : "ios26-ram";
     }
 
     static int ramMiB(Context c, int forOs) {
         int mib = c.getSharedPreferences("guest", Context.MODE_PRIVATE).getInt(ramKey(forOs), ramDefault(c, forOs));
-        for (int ok : forOs == WATCH ? RAM_CHOICES_WATCH : RAM_CHOICES_26) {
+        for (int ok : ramChoices(forOs)) {
             if (ok == mib) {
                 return mib;
             }
@@ -543,7 +550,7 @@ final class Guest {
                 .remove(keptRamKey(c, forOs)).apply();
     }
 
-    /** The RAM (MiB) the running iOS 26 or watch booted with, or loaded a save of (kept with each save). */
+    /** The RAM (MiB) the running iOS 16, iOS 26 or watch booted with, or loaded a save of (kept with each save). */
     private static volatile int bootRamMiB;
 
     static int bootRamMiB() {
@@ -554,21 +561,21 @@ final class Guest {
         return new File(c.getFilesDir(), userPrefix(c) + tag + ".ram");
     }
 
-    /** The RAM save @tag was made with; saves from before the setting (2026-11-09) ran on the trees' own size. */
+    /** The RAM save @tag was made with; saves from before the setting ran on the trees' own size (iOS 16: the payload's 4 GiB). */
     private static int savedRam(Context c, String tag, int forOs) {
         try {
             return Integer.parseInt(new String(java.nio.file.Files.readAllBytes(
                     new File(c.getFilesDir(), diskName(c, forOs) + "." + tag + ".ram").toPath()),
                     java.nio.charset.StandardCharsets.US_ASCII).trim());
         } catch (IOException | NumberFormatException e) {
-            return forOs == WATCH ? 3072 : 4096;
+            return forOs == WATCH ? 3072 : 4096;   // iOS 16 and iOS 26: 4 GiB
         }
     }
 
-    /** What save @tag of @forOs opens with: "3 GB · 4 vCPU" (iOS 16: its vCPUs; its RAM is fixed). */
+    /** What save @tag of @forOs opens with: "3 GB · 4 vCPU". */
     static String hardware(Context c, int forOs, String tag) {
         int cpus = savedCpus(c, forOs, tag);
-        return (forOs == IOS16 ? "" : savedRam(c, tag, forOs) / 1024 + " GB · ") + cpus + " vCPU";
+        return savedRam(c, tag, forOs) / 1024 + " GB · " + cpus + " vCPU";
     }
 
     /**
@@ -578,9 +585,6 @@ final class Guest {
      * setting changes again.
      */
     static boolean otherHardware(Context c, int forOs, String tag) {
-        if (forOs == IOS16) {
-            return false;
-        }
         int ram = savedRam(c, tag, forOs);
         return ram != ramMiB(c, forOs) && ram != c.getSharedPreferences("guest", Context.MODE_PRIVATE).getInt(keptRamKey(c, forOs), 0);
     }
@@ -1297,12 +1301,12 @@ final class Guest {
             } catch (IOException ignored) {
                 // then it counts as a save from before the clock fix
             }
-            if (bootRamMiB > 0) {
-                try (PrintWriter w = new PrintWriter(new FileWriter(savedRamFile(c, tag)))) {
-                    w.println(bootRamMiB);
-                } catch (IOException ignored) {
-                    // then it loads with the trees' own size, which may not be its own
-                }
+        }
+        if (bootRamMiB > 0) {
+            try (PrintWriter w = new PrintWriter(new FileWriter(savedRamFile(c, tag)))) {
+                w.println(bootRamMiB);
+            } catch (IOException ignored) {
+                // then it loads with the trees' own size, which may not be its own
             }
         }
     }
@@ -1618,7 +1622,7 @@ final class Guest {
         state = "booting";
         boolean v = os != IOS16;
         // the engine the system runs on, so the record's engine line (and its SHA-1) is a real one
-        track(os, false, "a crash test", logAt, bootCpus, v ? ramMiB(c, os) : 7168, v ? fb26W + "x" + fb26H : "",
+        track(os, false, "a crash test", logAt, bootCpus, ramMiB(c, os), v ? fb26W + "x" + fb26H : "",
                 v ? Emu.qemu26Path(c) : Emu.qemuPath(c));
     }
 
@@ -1859,8 +1863,13 @@ final class Guest {
         int smp = resumed ? savedCpus(c, loadTag) : plan.smp;
         AppLog.note(c, "cpus: " + smp + " vCPUs" + (resumed && smp != plan.smp ? " (the save's)" : "")
                 + ", pin " + (plan.pin.isEmpty() ? "none" : plan.pin) + "; " + plan.why);
+        // the memory XNU manages: a save's own, else the one chosen (maxmem in the boot-args; QEMU maps 7 GiB either way)
+        int ram = resumed ? savedRam(c, loadTag, IOS16) : ramMiB(c, IOS16);
+        bootRamMiB = ram;
+        AppLog.note(c, "guest RAM " + ram + " MiB" + (resumed ? " (the save's)" : "") + " of the 7 GiB QEMU maps");
         if (!resumed) {
-            Installer.prepareBoot(c, g, smp);   // this phone's time zone, region, clock and cpus= in the boot-args
+            // this phone's time zone, region, clock, cpus= and maxmem= in the boot-args
+            Installer.prepareBoot(c, g, smp, ram);
         }
         bootCpus = smp;
         new File(run, "qmp.sock").delete();
@@ -1880,6 +1889,9 @@ final class Guest {
                 // (a lock held at the save looks held for minutes); the kernel (xnu 0103) sets its
                 // calendar from the PL031 within 5 s instead
                 "-M", "virt,gic-version=3,memory-backend=m0",
+                // 7G is address space: the kernel sits at 4 GiB, the framebuffer and the boot stub below it.
+                // What iOS gets is maxmem in the boot-args (Installer.prepareBoot); pages it never touches
+                // stay holes of the memfd.
                 "-object", "memory-backend-memfd,id=m0,size=7G,share=on",
                 "-cpu", "cortex-a76", "-smp", String.valueOf(smp), "-m", "7G",
                 "-display", "none", "-monitor", "none", "-parallel", "none",
@@ -1941,7 +1953,7 @@ final class Guest {
             throw new IOException("cannot start QEMU");
         }
         state = resumed ? "resuming" : "booting";
-        track(IOS16, false, resumed ? "the save " + loadTag : "a boot", logAt, smp, 7168, "", Emu.qemuPath(c));
+        track(IOS16, false, resumed ? "the save " + loadTag : "a boot", logAt, smp, ram, "", Emu.qemuPath(c));
         connectQmp(c, pid);
     }
 
