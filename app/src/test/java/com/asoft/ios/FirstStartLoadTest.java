@@ -159,6 +159,75 @@ public class FirstStartLoadTest {
         assertEquals(none, FirstStartDiag.coresText(0, 500, -5, 100));
     }
 
+    // ---- which cores, and how fast ----------------------------------------------------------------------------
+
+    /** A phone with four slow cores (0-3) and four fast ones (4-7), as capacities by core number. */
+    private static java.util.function.IntUnaryOperator caps(int... c) {
+        return i -> i < c.length ? c[i] : -1;
+    }
+
+    @Test
+    public void fourSlowCoresOnAPhoneWhoseBestIs1024AreNotFast() {
+        assertEquals("allowed cores 0-3: capacity 512,512,512,512 (0 of 4 fast, best on this phone 1024)",
+                FirstStartDiag.coresDescribe("0-3", caps(512, 512, 512, 512, 1024, 1024, 1024, 1024), 1024));
+    }
+
+    @Test
+    public void aListWithTwoRangesIsReadInOrder() {
+        assertEquals("allowed cores 0-1,4-5: capacity 1024,1024,1024,1024 (4 of 4 fast, best on this phone 1024)",
+                FirstStartDiag.coresDescribe("0-1,4-5", caps(1024, 1024, 1024, 1024, 1024, 1024), 1024));
+        assertEquals("allowed cores 0-1,4-5: capacity 512,512,1024,1024 (2 of 4 fast, best on this phone 1024)",
+                FirstStartDiag.coresDescribe("0-1,4-5", caps(512, 512, 512, 512, 1024, 1024, 1024, 1024), 1024));
+        assertEquals("allowed cores 5: capacity 1024 (1 of 1 fast, best on this phone 1024)",
+                FirstStartDiag.coresDescribe("5", caps(512, 512, 512, 512, 1024, 1024, 1024, 1024), 1024));
+    }
+
+    @Test
+    public void fastIsSixtyPercentOfTheBestLikeCpuPlan() {
+        assertEquals("allowed cores 0-1: capacity 615,614 (1 of 2 fast, best on this phone 1024)", FirstStartDiag.coresDescribe("0-1", caps(615, 614), 1024));
+        assertEquals("allowed cores 0-1: capacity 492,1024 (1 of 2 fast, best on this phone 1024)", FirstStartDiag.coresDescribe("0-1", caps(492, 1024), 1024));
+    }
+
+    @Test
+    public void anUnreadableCapacityIsSaid() {
+        assertEquals("allowed cores 0-1,4-5: capacity not readable", FirstStartDiag.coresDescribe("0-1,4-5", i -> -1, 1024));
+        assertEquals("allowed cores 0-1: capacity not readable", FirstStartDiag.coresDescribe("0-1", caps(512, 512), -1));
+        assertEquals("allowed cores 0-3: capacity 1024,1024,?,? (2 of 4 fast, 2 not readable, best on this phone 1024)",
+                FirstStartDiag.coresDescribe("0-3", caps(1024, 1024), 1024));
+    }
+
+    @Test
+    public void aListThatIsNoListIsSaid() {
+        for (String l : new String[] {null, "", "-", "abc", "3-1", "1-2-3", "0-1,", "0-1000", "-1"}) {
+            assertEquals("for " + l, "allowed cores not readable", FirstStartDiag.coresDescribe(l, caps(1024, 1024), 1024));
+        }
+    }
+
+    @Test
+    public void theBestCapacityIsTheHighestOfThePhone() {
+        assertEquals(1024, FirstStartDiag.bestCapacity(caps(300, 300, 300, 300, 1024, 1024, 1024, 1024)));
+        assertEquals(492, FirstStartDiag.bestCapacity(caps(492, 492)));
+        assertEquals(-1, FirstStartDiag.bestCapacity(i -> -1));
+    }
+
+    @Test
+    public void theCpusetIsNamedByItsFirstLine() {
+        assertEquals("cpuset /moderate", FirstStartDiag.cpusetText("/moderate"));
+        assertEquals("cpuset /top-app", FirstStartDiag.cpusetText("/top-app\n"));
+        assertEquals("cpuset not readable", FirstStartDiag.cpusetText(""));
+        assertEquals("cpuset not readable", FirstStartDiag.cpusetText(null));
+        assertEquals("", FirstStartDiag.readCpuset(Integer.MAX_VALUE));          // (no such process)
+        assertEquals(-1, FirstStartDiag.readCapacity(9999));                      // (no such core)
+    }
+
+    @Test
+    public void theCoresFollowTheAllowedListInTheLine() {
+        assertEquals("x, engine sample: none, QEMU's CPU use not readable, QEMU may run on cores 0-3, cpuset /moderate,"
+                        + " allowed cores 0-3: capacity 512,512,512,512 (0 of 4 fast, best on this phone 1024), screen off",
+                FirstStartDiag.withHost("x", "engine sample: none", "QEMU's CPU use not readable", "0-3", "cpuset /moderate",
+                        "allowed cores 0-3: capacity 512,512,512,512 (0 of 4 fast, best on this phone 1024)", "screen off"));
+    }
+
     @Test
     public void theProgressLineGetsTheEngineTheCoresAndTheHostAfterIt() {
         String base = FirstStartDiag.progressLine(40, 1500, 120, 410, 3, "off");

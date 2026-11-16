@@ -314,8 +314,12 @@ final class PhoneSetup {
      */
     private static String hostFacts(Context c, String line, File stderr, long ticksBefore, long ticksNow, long elapsedMs, long hz) {
         try {
+            int pid = Guest.pid(c);
+            String allowed = RunStats.cpus(pid);
             return FirstStartDiag.withHost(line, FirstStartDiag.engineText(FirstStartDiag.lastElSample(FirstStartDiag.stderrTail(stderr))),
-                    FirstStartDiag.coresText(ticksBefore, ticksNow, elapsedMs, hz), RunStats.cpus(Guest.pid(c)), PhoneSetup26.hostText(c, 0));
+                    FirstStartDiag.coresText(ticksBefore, ticksNow, elapsedMs, hz), allowed, FirstStartDiag.cpusetText(FirstStartDiag.readCpuset(pid)),
+                    FirstStartDiag.coresDescribe(allowed, FirstStartDiag::readCapacity, FirstStartDiag.bestCapacity(FirstStartDiag::readCapacity)),
+                    PhoneSetup26.hostText(c, 0));
         } catch (RuntimeException e) {
             return line + ", engine and host facts not read: " + e;
         }

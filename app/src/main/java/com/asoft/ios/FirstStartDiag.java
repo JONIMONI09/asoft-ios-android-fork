@@ -1,7 +1,9 @@
 package com.asoft.ios;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -15,6 +17,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.IntUnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -495,7 +498,103 @@ final class FirstStartDiag {
 
     /** @line with the engine's, QEMU's CPU and the phone's state after it (RunStats.cpus, PhoneSetup26.hostText). */
     static String withHost(String line, String engine, String cores, String allowed, String host) {
-        return line + ", " + engine + ", " + cores + ", QEMU may run on cores " + allowed + (host == null || host.isEmpty() ? "" : ", " + host);
+        return withHost(line, engine, cores, allowed, null, null, host);
+    }
+
+    /**
+     * As above with which cores those are: @cpuset (cpusetText) and @capacities (coresDescribe) follow the list of
+     * allowed cores; null leaves one out.
+     */
+    static String withHost(String line, String engine, String cores, String allowed, String cpuset, String capacities, String host) {
+        return line + ", " + engine + ", " + cores + ", QEMU may run on cores " + allowed + (cpuset == null || cpuset.isEmpty() ? "" : ", " + cpuset)
+                + (capacities == null || capacities.isEmpty() ? "" : ", " + capacities) + (host == null || host.isEmpty() ? "" : ", " + host);
+    }
+
+    // -- which cores, and how fast they are ---------------------------------------------------------------------
+
+    /** The first line of /proc/@pid/cpuset ("/top-app": the group Android keeps QEMU in), "" when unreadable. */
+    static String readCpuset(int pid) {
+        try (BufferedReader r = new BufferedReader(new FileReader("/proc/" + pid + "/cpuset"))) {
+            String l = r.readLine();
+            return l == null ? "" : l.trim();
+        } catch (IOException | RuntimeException e) {
+            return "";
+        }
+    }
+
+    /** "cpuset /moderate". */
+    static String cpusetText(String firstLine) {
+        return firstLine == null || firstLine.trim().isEmpty() ? "cpuset not readable" : "cpuset " + firstLine.trim();
+    }
+
+    /** The kernel's cpu_capacity of core @cpu (1024 = the fastest), -1 when it cannot be read (CpuPlan reads the same file). */
+    static int readCapacity(int cpu) {
+        try {
+            return Integer.parseInt(new String(java.nio.file.Files.readAllBytes(new File("/sys/devices/system/cpu/cpu" + cpu + "/cpu_capacity").toPath())).trim());
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
+    }
+
+    /** The best capacity among the phone's cores (cpu0 to cpu63), -1 when none can be read. */
+    static int bestCapacity(IntUnaryOperator capacityOf) {
+        int best = -1;
+        for (int i = 0; i < 64; i++) {
+            best = Math.max(best, capacityOf.applyAsInt(i));
+        }
+        return best;
+    }
+
+    /** The cores of a cpuset list like "0-1,4-5" in order; null when it is none ("-" is RunStats.cpus' word for unreadable). */
+    private static List<Integer> parseCores(String list) {
+        if (list == null) {
+            return null;
+        }
+        List<Integer> out = new ArrayList<>();
+        for (String part : list.trim().split(",", -1)) {
+            String[] r = part.trim().split("-", -1);
+            try {
+                int from = Integer.parseInt(r[0]), to = r.length == 2 ? Integer.parseInt(r[1]) : from;
+                if (r.length > 2 || from < 0 || to < from || to > 255) {
+                    return null;
+                }
+                for (int i = from; i <= to; i++) {
+                    out.add(i);
+                }
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Which cores QEMU may run on and how fast they are, as CpuPlan ranks them (@bestCapacity: the phone's highest
+     * cpu_capacity; "fast" = 60 % of it or more): "allowed cores 0-1,4-5: capacity 1024,1024,1024,1024 (4 of 4 fast,
+     * best on this phone 1024)". @capacityOf: a core's capacity, -1 when it cannot be read.
+     */
+    static String coresDescribe(String allowedList, IntUnaryOperator capacityOf, int bestCapacity) {
+        List<Integer> cores = parseCores(allowedList);
+        if (cores == null || cores.isEmpty()) {
+            return "allowed cores not readable";
+        }
+        StringBuilder caps = new StringBuilder();
+        int fast = 0, unreadable = 0;
+        for (int core : cores) {
+            int c = capacityOf.applyAsInt(core);
+            caps.append(caps.length() > 0 ? "," : "").append(c < 0 ? "?" : String.valueOf(c));
+            if (c < 0) {
+                unreadable++;
+            } else if (c * 10 >= bestCapacity * 6) {
+                fast++;
+            }
+        }
+        String head = "allowed cores " + allowedList.trim() + ": ";
+        if (unreadable == cores.size() || bestCapacity <= 0) {
+            return head + "capacity not readable";
+        }
+        return head + "capacity " + caps + " (" + fast + " of " + cores.size() + " fast" + (unreadable > 0 ? ", " + unreadable + " not readable" : "")
+                + ", best on this phone " + bestCapacity + ")";
     }
 
     // -- the record ----------------------------------------------------------------------------------------
