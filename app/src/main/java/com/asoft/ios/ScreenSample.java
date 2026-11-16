@@ -8,7 +8,7 @@ import java.util.Locale;
 
 /**
  * A small picture of the guest's screen from a QEMU screendump (PPM), for the record of a first start that gave
- * up: is the screen black, the Apple logo (a few colours) or a lock screen (hundreds)? QEMU pads each PPM row to
+ * up: is the screen black, the Apple logo (a few colours) or a lock screen (tens to hundreds: 49 on the iOS 16 lock screen of a Linux harness run)? QEMU pads each PPM row to
  * 4 bytes (1179 pixels: 3540 bytes, not 3537), so the row length comes from the file's size, not from the
  * header's width. No Android in here.
  */
@@ -122,7 +122,7 @@ final class ScreenSample {
         List<String> out = new ArrayList<>();
         out.add(oneLine());
         out.add(String.format(Locale.ROOT, "rows of %d bytes; the colours are counted on every 7th pixel of every 7th row (the Apple logo has a few,"
-                + " a lock screen hundreds); the picture, dark to light: \"%s\"", stride, RAMP));
+                + " a lock screen tens to hundreds: 49 on the iOS 16 lock screen of a Linux harness run); the picture, dark to light: \"%s\"", stride, RAMP));
         for (String r : picture) {
             out.add("|" + r + "|");
         }
