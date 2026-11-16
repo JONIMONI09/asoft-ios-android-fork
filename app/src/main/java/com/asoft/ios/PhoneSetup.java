@@ -202,6 +202,9 @@ final class PhoneSetup {
         Guest.select(c, Guest.IOS16);
         Guest.startError = null;
         Guest.start(c, null);
+        // QEMU's CPU use between two notes, from /proc/PID/stat; its stderr holds the engine's idle/busy samples
+        File stderr = new File(Guest.runDir(c), "qemu-stderr.txt");
+        long hz = clkTck(), ticksAt = System.currentTimeMillis(), ticksBefore = FirstStartDiag.readTicks(Guest.pid(c));
         boolean offSeen = false, up = false;
         FirstStartWatch watch = new FirstStartWatch(t0);
         FirstStartDiag.Marks marks = new FirstStartDiag.Marks(t0);
@@ -224,7 +227,7 @@ final class PhoneSetup {
                     String why = watch.giveUpText(v, nowMs);
                     AppLog.note(c, "setup: first start gives up (" + v + "): " + why);
                     AppLog.note(c, "first start: " + marks.events(nowMs));
-                    noteGiveUp(c, marks, nowMs);    // the screen and the LED, while QEMU still runs
+                    noteGiveUp(c, marks, nowMs, stderr, ticksBefore, nowMs - ticksAt, hz);    // the screen and the LED, while QEMU still runs
                     end(c);                         // what it did so far stays in a save, as when the user stops it
                     throw new IOException(why);
                 }
@@ -259,9 +262,15 @@ final class PhoneSetup {
                 watch.observe(nowMs, chunk, milestone);
                 if (nowMs - t0 >= (notes + 1) * 10 * SetupLimits.MIN) {
                     notes = (nowMs - t0) / (10 * SetupLimits.MIN);
-                    AppLog.note(c, FirstStartDiag.progressLine(notes * 10, marks.lines(), marks.lines() - linesAtNote,
-                            watch.distinctKinds(), watch.sinceNovelMin(nowMs), FirstStartDiag.ledText(FirstStartDiag.readLed(Guest.ledsFile(c)))));
+                    long ticksNow = FirstStartDiag.readTicks(Guest.pid(c));
+                    AppLog.note(c, hostFacts(c, FirstStartDiag.progressLine(notes * 10, marks.lines(), marks.lines() - linesAtNote,
+                            watch.distinctKinds(), watch.sinceNovelMin(nowMs), FirstStartDiag.ledText(FirstStartDiag.readLed(Guest.ledsFile(c)))),
+                            stderr, ticksBefore, ticksNow, nowMs - ticksAt, hz));
                     linesAtNote = marks.lines();
+                    if (ticksNow >= 0) {
+                        ticksBefore = ticksNow;
+                        ticksAt = nowMs;
+                    }
                 }
                 // 38 min on the S25 (PC 21): the bar fills toward that and waits at 95; the text says what is really going on
                 p.step("firststart", (int) Math.min(95, s * 100 / (40 * 60)), watch.status(nowMs));
@@ -286,14 +295,39 @@ final class PhoneSetup {
      * the setup record (FirstStartDiag.lastGiveUp). The screen is one QMP screendump into the app's cache folder
      * (QEMU runs as this app and writes it), 10 s at most; a failure is a line that says why. Never throws.
      */
-    private static void noteGiveUp(Context c, FirstStartDiag.Marks marks, long nowMs) {
+    private static void noteGiveUp(Context c, FirstStartDiag.Marks marks, long nowMs, File stderr, long ticksBefore, long elapsedMs, long hz) {
         try {
             String led = FirstStartDiag.ledText(FirstStartDiag.readLed(Guest.ledsFile(c)));
             List<String> screen = screenSample(c);
-            FirstStartDiag.lastGiveUp = new FirstStartDiag.GiveUp(nowMs, marks.events(nowMs), led, screen);
-            AppLog.note(c, "first start: display LED " + led + "; " + (screen.isEmpty() ? "no screen sample" : screen.get(0)));
+            String el = FirstStartDiag.lastElSample(FirstStartDiag.stderrTail(stderr));
+            FirstStartDiag.lastGiveUp = new FirstStartDiag.GiveUp(nowMs, marks.events(nowMs), led, screen, el == null ? "none" : el);
+            AppLog.note(c, hostFacts(c, "first start: display LED " + led + "; " + (screen.isEmpty() ? "no screen sample" : screen.get(0)),
+                    stderr, ticksBefore, FirstStartDiag.readTicks(Guest.pid(c)), elapsedMs, hz));
         } catch (RuntimeException e) {
             AppLog.note(c, "first start: the give-up facts could not be read: " + e);
+        }
+    }
+
+    /**
+     * @line with what says idle or busy and what CPU the phone really gives QEMU: the engine's newest sampler line
+     * (QEMU's stderr), the CPU QEMU used since the last note, the cores it may run on, the phone's state. Never throws.
+     */
+    private static String hostFacts(Context c, String line, File stderr, long ticksBefore, long ticksNow, long elapsedMs, long hz) {
+        try {
+            return FirstStartDiag.withHost(line, FirstStartDiag.engineText(FirstStartDiag.lastElSample(FirstStartDiag.stderrTail(stderr))),
+                    FirstStartDiag.coresText(ticksBefore, ticksNow, elapsedMs, hz), RunStats.cpus(Guest.pid(c)), PhoneSetup26.hostText(c, 0));
+        } catch (RuntimeException e) {
+            return line + ", engine and host facts not read: " + e;
+        }
+    }
+
+    /** The kernel's clock tick rate (utime and stime in /proc/PID/stat count in these), 100 when it cannot be asked. */
+    private static long clkTck() {
+        try {
+            long v = android.system.Os.sysconf(android.system.OsConstants._SC_CLK_TCK);
+            return v > 0 ? v : 100;
+        } catch (RuntimeException e) {
+            return 100;
         }
     }
 

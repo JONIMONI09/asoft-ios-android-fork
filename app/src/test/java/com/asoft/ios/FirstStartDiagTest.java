@@ -193,6 +193,7 @@ public class FirstStartDiagTest {
         FirstStartDiag.addRecordParts(h, sec, s, null);
         assertEquals("(the console has no display off line)", sec.get(FirstStartDiag.S_AROUND).get(0));
         assertFalse(h.containsKey("display LED at give-up"));
+        assertFalse(h.containsKey("engine at give-up"));
         assertFalse(sec.containsKey(FirstStartDiag.S_SCREEN));
     }
 
@@ -279,9 +280,11 @@ public class FirstStartDiagTest {
         LinkedHashMap<String, String> h = new LinkedHashMap<>();
         LinkedHashMap<String, List<String>> sec = new LinkedHashMap<>();
         List<String> screen = Arrays.asList("screen 1179x2556, 0.0 % not black, 1 colours in a 4-bit sample");
-        FirstStartDiag.addRecordParts(h, sec, s, new FirstStartDiag.GiveUp(5, "display on at min 2 (line 1); no display off after 310 min", "off", screen));
+        FirstStartDiag.addRecordParts(h, sec, s, new FirstStartDiag.GiveUp(5, "display on at min 2 (line 1); no display off after 310 min", "off", screen,
+                "el-sample t=1650s all: halted  0.0% el1 45.7% el0-tcg  4.8% el0-nat 49.4% | native 57036 ms"));
         assertEquals("display on at min 2 (line 1); no display off after 310 min | " + s.marks.summary(), h.get("first start console"));
         assertEquals("off", h.get("display LED at give-up"));
+        assertEquals("el-sample t=1650s all: halted  0.0% el1 45.7% el0-tcg  4.8% el0-nat 49.4% | native 57036 ms", h.get("engine at give-up"));
         assertTrue(!FirstStartDiag.S_MAP.contains("console") && !FirstStartDiag.S_HEAD.contains("console") && !FirstStartDiag.S_AROUND.contains("console"));
         assertEquals(Arrays.asList(FirstStartDiag.S_SCREEN, FirstStartDiag.S_MAP, FirstStartDiag.S_HEAD, FirstStartDiag.S_AROUND),
                 new ArrayList<>(sec.keySet()));

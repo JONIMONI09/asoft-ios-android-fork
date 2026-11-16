@@ -15,6 +15,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * What the iOS 16 first start's console says, kept for the failure record (SetupRecord) and the app log. On some
@@ -331,12 +333,15 @@ final class FirstStartDiag {
         final String led;
         /** The section "the screen when the first start gave up". */
         final List<String> screen;
+        /** The engine's newest "el-sample ... all:" line (lastElSample), "none" without one. */
+        final String engine;
 
-        GiveUp(long atMs, String events, String led, List<String> screen) {
+        GiveUp(long atMs, String events, String led, List<String> screen, String engine) {
             this.atMs = atMs;
             this.events = events;
             this.led = led;
             this.screen = screen;
+            this.engine = engine;
         }
     }
 
@@ -385,6 +390,114 @@ final class FirstStartDiag {
         return v == null || v.isEmpty() ? "(empty, not written)" : v + " (not accepted, not written)";
     }
 
+    // -- idle or busy, and what CPU QEMU really gets --------------------------------------------------------
+
+    /** How much of qemu-stderr.txt's end is looked at for the engine's sampler lines. */
+    static final int STDERR_TAIL = 32 << 10;
+    private static final int EL_LINE = 140;
+    private static final Pattern EL_ALL = Pattern.compile(
+            "el-sample t=(\\d+)s all: halted +([\\d.]+)%(?: el1 +([\\d.]+)% el0-tcg +([\\d.]+)% el0-nat +([\\d.]+)%)?");
+
+    /** The last STDERR_TAIL bytes of @f (QEMU's stderr), "" when it cannot be read. */
+    static String stderrTail(File f) {
+        try (RandomAccessFile r = new RandomAccessFile(f, "r")) {
+            long from = Math.max(0, r.length() - STDERR_TAIL);
+            byte[] b = new byte[(int) (r.length() - from)];
+            r.seek(from);
+            r.readFully(b);
+            return new String(b, StandardCharsets.ISO_8859_1);
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    /**
+     * The newest "el-sample t=Ns all: halted ..." line of @stderrTail (the engine's sampler prints one every 30 s: the
+     * share of the time the vCPUs were halted, i.e. iOS had nothing to do, and in EL1, EL0 under TCG and native EL0),
+     * cut to its first 140 characters; null when there is none. The text may start in the middle of a line, and its
+     * last line may be unfinished (the engine is still writing it): neither is taken.
+     */
+    static String lastElSample(String stderrTail) {
+        if (stderrTail == null) {
+            return null;
+        }
+        String[] ls = stderrTail.split("\n", -1);
+        for (int i = ls.length - 2; i >= 0; i--) {         // (the piece after the last newline is unfinished or empty)
+            Matcher m = EL_ALL.matcher(ls[i]);
+            if (m.find()) {
+                String l = ls[i].substring(m.start()).replace("\r", "");
+                return l.length() > EL_LINE ? l.substring(0, EL_LINE) : l;
+            }
+        }
+        return null;
+    }
+
+    /** The progress line's part for a sampler line: "engine 1650s: halted 0.0% el1 45.7% el0-tcg 4.8% el0-nat 49.4%". */
+    static String engineText(String elLine) {
+        if (elLine == null) {
+            return "engine sample: none";
+        }
+        Matcher m = EL_ALL.matcher(elLine);
+        if (!m.find()) {
+            return "engine sample: unreadable";
+        }
+        return "engine " + m.group(1) + "s: halted " + m.group(2) + "%"
+                + (m.group(3) == null ? "" : " el1 " + m.group(3) + "% el0-tcg " + m.group(4) + "% el0-nat " + m.group(5) + "%");
+    }
+
+    /**
+     * utime + stime, in clock ticks, from a /proc/PID/stat line (fields 14 and 15); -1 when it is not one. The
+     * fields are counted after the last ")" because the command name between the parentheses may hold spaces and
+     * parentheses itself.
+     */
+    static long cpuTicks(String procStatLine) {
+        if (procStatLine == null) {
+            return -1;
+        }
+        int close = procStatLine.lastIndexOf(')');
+        if (close < 0) {
+            return -1;
+        }
+        String[] f = procStatLine.substring(close + 1).trim().split("\\s+");      // f[0] is field 3, the state
+        if (f.length < 13) {
+            return -1;
+        }
+        try {
+            long user = Long.parseLong(f[11]), system = Long.parseLong(f[12]);
+            return user < 0 || system < 0 ? -1 : user + system;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /** QEMU's CPU ticks from /proc/@pid/stat, -1 when unreadable (the process is gone). */
+    static long readTicks(int pid) {
+        try (RandomAccessFile r = new RandomAccessFile("/proc/" + pid + "/stat", "r")) {
+            byte[] b = new byte[4096];
+            int n = r.read(b);
+            return n <= 0 ? -1 : cpuTicks(new String(b, 0, n, StandardCharsets.ISO_8859_1));
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * "QEMU used 3.4 cores on average in the last 10 min" from the ticks at both ends of the interval, its length and
+     * the kernel's tick rate (@clkTck; 100 when that is not known).
+     */
+    static String coresText(long ticksBefore, long ticksNow, long elapsedMs, long clkTck) {
+        if (ticksBefore < 0 || ticksNow < ticksBefore || elapsedMs <= 0) {
+            return "QEMU's CPU use not readable";
+        }
+        double cores = (ticksNow - ticksBefore) / (double) (clkTck > 0 ? clkTck : 100) / (elapsedMs / 1000.0);
+        return String.format(Locale.ROOT, "QEMU used %.1f cores on average in the last %d min", cores, Math.max(1, (elapsedMs + 30_000) / 60_000));
+    }
+
+    /** @line with the engine's, QEMU's CPU and the phone's state after it (RunStats.cpus, PhoneSetup26.hostText). */
+    static String withHost(String line, String engine, String cores, String allowed, String host) {
+        return line + ", " + engine + ", " + cores + ", QEMU may run on cores " + allowed + (host == null || host.isEmpty() ? "" : ", " + host);
+    }
+
     // -- the record ----------------------------------------------------------------------------------------
 
     // (no "console" in these names: CrashReport gives such a section twice the room in the shortened GitHub link,
@@ -404,6 +517,7 @@ final class FirstStartDiag {
                 + (scan.truncated ? " (the first " + (MAX_READ >> 20) + " MB)" : "") + (scan.error.isEmpty() ? "" : " (read error: " + scan.error + ")"));
         if (g != null) {
             h.put("display LED at give-up", g.led);
+            h.put("engine at give-up", g.engine);
             s.put(S_SCREEN, g.screen);
         }
         s.put(S_MAP, scan.map());
