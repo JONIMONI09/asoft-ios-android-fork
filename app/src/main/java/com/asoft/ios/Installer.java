@@ -64,8 +64,10 @@ final class Installer {
         }
         String base = GuestImage.cmdline(Files.readAllBytes(payload.toPath()));
         String region = java.util.Locale.getDefault().getCountry();
-        GuestImage.write(payload, GuestImage.withCpus(GuestImage.withLocale(base, java.util.TimeZone.getDefault().getID(),
-                region, android.text.format.DateFormat.is24HourFormat(c)), cpus), dir);
+        String tz = java.util.TimeZone.getDefault().getID();
+        boolean clock24 = android.text.format.DateFormat.is24HourFormat(c);
+        AppLog.note(c, FirstStartDiag.localeLine(tz, region, clock24));
+        GuestImage.write(payload, GuestImage.withCpus(GuestImage.withLocale(base, tz, region, clock24), cpus), dir);
     }
 
     /** Something an import would delete: an installed iOS 16, or its iPhone's own disk and saves. */

@@ -1678,6 +1678,7 @@ final class Guest {
         try (PrintWriter w = new PrintWriter(new FileWriter(new File(c.getFilesDir(), "resolv.conf")))) {
             w.print(sb);
         }
+        AppLog.note(c, "network: " + NetFacts.describe(c));
     }
 
     /** The end of QEMU's stderr: why it stopped, for the screen. */
