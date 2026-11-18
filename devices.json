@@ -90,6 +90,38 @@
       "note": "one report: iOS 16 ran 15 min, up to 9 fps; the setup took 11 h 38 min (disk build 10 h 14 min on a hot phone, first start 1 h 3 min)"
     },
     {
+      "soc": "SM8550",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S918B",
+      "note": "one report: iOS 16 ran 45 min, up to 21 fps; the first start took 29 min; free memory went down to 709 MB"
+    },
+    {
+      "soc": "SM7125",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH2159",
+      "note": "one report: iOS 16 ran 55 min, up to 34 fps"
+    },
+    {
+      "soc": "MT6769",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 24040RN64Y",
+      "note": "one report: iOS 16 ran 2 h 25 min, up to 39 fps"
+    },
+    {
+      "soc": "SM7325",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Vivo V2250",
+      "note": "one report: iOS 16 ran 1 h 55 min, up to 11 fps; free memory went down to 661 MB"
+    },
+    {
       "soc": "",
       "gpu": "Mali",
       "os": ["ios26", "watch"],

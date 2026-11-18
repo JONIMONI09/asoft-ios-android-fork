@@ -16,6 +16,10 @@ same list in words.
 | Xiaomi Redmi K20 Pro | SM8150 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 13 fps; setup 3 h 9 min (disk build 1 h 43 min, first start 1 h 11 min); free memory went down to 208 MB. |
 | Infinix X6885 | MT6789 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 35 minutes, up to 6 fps; setup 4 h 50 min (disk build 2 h 14 min, first start 1 h 54 min). |
 | OPPO CPH2305 | SM8450 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 9 fps; setup 11 h 38 min (disk build 10 h 14 min on a hot phone, first start 1 h 3 min). |
+| Samsung SM-S918B | SM8550 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 45 minutes, up to 21 fps; first start 29 min; free memory went down to 709 MB. |
+| OPPO CPH2159 | SM7125 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 55 minutes, up to 34 fps. |
+| Xiaomi 24040RN64Y | MT6769 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 2 h 25 min, up to 39 fps. |
+| Vivo V2250 | SM7325 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 1 h 55 min, up to 11 fps; free memory went down to 661 MB. |
 | any phone with an ARM Mali GPU | any | Mali | fails | no GPU needed | fails | Most fail the GPU check (no VK_EXT_external_memory_host); one that passes runs, slowly so far. |
 | any phone with an Imagination PowerVR GPU | any | PowerVR | fails | no GPU needed | fails | The GPU check fails (no VK_EXT_external_memory_host); not supported yet. |
 | any phone with a Samsung Xclipse GPU | any | Xclipse | fails | no GPU needed | fails | The GPU check fails or the picture is wrong; not supported yet. |
