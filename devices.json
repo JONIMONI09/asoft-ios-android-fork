@@ -42,6 +42,54 @@
       "note": "one report: iOS 16 ran 15 min, up to 12 fps, the reporter says it lags; the setup took 5 h 35 min (disk build 4 h 22 min, first start 1 h 1 min)"
     },
     {
+      "soc": "SM8350",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-G990B2",
+      "note": "one report: iOS 16 ran 15 min, up to 37 fps"
+    },
+    {
+      "soc": "MT6899",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 2511FPC34G",
+      "note": "one report: iOS 16 ran 15 min, up to 46 fps"
+    },
+    {
+      "soc": "SM7635",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Nothing A059",
+      "note": "one report: iOS 16 ran 40 min, up to 16 fps; the setup took 1 h 53 min (disk build 54 min, first start 54 min)"
+    },
+    {
+      "soc": "SM8150",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi Redmi K20 Pro",
+      "note": "one report: iOS 16 ran 10 min, up to 13 fps; the setup took 3 h 9 min (disk build 1 h 43 min, first start 1 h 11 min); free memory went down to 208 MB"
+    },
+    {
+      "soc": "MT6789",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Infinix X6885",
+      "note": "one report: iOS 16 ran 35 min, up to 6 fps; the setup took 4 h 50 min (disk build 2 h 14 min, first start 1 h 54 min)"
+    },
+    {
+      "soc": "SM8450",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH2305",
+      "note": "one report: iOS 16 ran 15 min, up to 9 fps; the setup took 11 h 38 min (disk build 10 h 14 min on a hot phone, first start 1 h 3 min)"
+    },
+    {
       "soc": "",
       "gpu": "Mali",
       "os": ["ios26", "watch"],
