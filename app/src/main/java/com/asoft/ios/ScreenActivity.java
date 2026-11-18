@@ -65,11 +65,11 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     /**
      * This QEMU loaded a save: once it runs, a display that was asleep in the save is woken. AutoSave saves
      * when iOS has settled, mostly with its display off, so a load showed only "Screen off" and looked as if
-     * it had not worked (2026-11-06).
+     * it had not worked (2026-11-06). CoverWake also keeps the app's own wake presses (this one, a tap on the
+     * cover, the phone's unlock) apart from the user's, and sends one at a time: iOS 16's side button toggles
+     * the display (#122).
      */
-    private boolean wakeAfterLoad;
-    private long wakeAt, wakeUntil, wakePowerMs;
-    private int wakeTries;
+    private final CoverWake coverWake = new CoverWake();
     private long ledsRead;
     private boolean displayOff, displayWasOff, coverArmed;
     private long savingSince, savingShown = -1;
@@ -155,7 +155,13 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         cover.setVisibility(View.GONE);
         cover.setOnClickListener(v -> {
             if (!Guest.saving() && !closing) {
-                wake();
+                readLeds();     // the side button toggles iOS 16's display: send it only to a display seen off just now
+                CoverWake.Tap tap = coverWake.tap(android.os.SystemClock.uptimeMillis(), displayOff);
+                if (tap == CoverWake.Tap.SEND) {
+                    wake();
+                } else if (tap == CoverWake.Tap.PENDING) {
+                    AppLog.note(this, "tap on the cover ignored: the last wake press is still on its way");
+                }
             }
         });
         if (watchMode) {
@@ -274,9 +280,14 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         guestBack();
     }
 
-    /** Wakes iOS's display: the side button on iOS 16, Home on iOS 26 (power would sleep it again). */
+    /**
+     * Wakes iOS's display: the side button on iOS 16, Home on iOS 26 (power would sleep it again). The press is
+     * the app's own: coverWake knows it (Guest.lastPowerMs after it is not a press of the user's) and holds
+     * the next wake press back until the display is seen on or a few seconds have passed.
+     */
     private void wake() {
         Guest.button(Guest.ios26Running() ? "home" : "power");
+        coverWake.pressed(android.os.SystemClock.uptimeMillis(), Guest.lastPowerMs);
     }
 
     /** The bar's Home (in AOD it wakes iOS, to its lock screen). */
@@ -849,9 +860,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         if (pid != ledsPid) {
             ledsPid = pid;
             ledsPidSince = android.os.SystemClock.uptimeMillis();
-            wakeAfterLoad = Guest.resumed;
-            wakeAt = 0;
-            wakeTries = 0;
+            coverWake.reset(Guest.resumed);
             displayOff = displayWasOff = false;
             // a loaded state is past the boot's own display off; iOS 26's sleep is only ever a real one
             coverArmed = Guest.resumed || Guest.ios26Running();
@@ -877,6 +886,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 coverArmed = true;          // iOS turns the display off once under the Apple logo
             }
             displayOff = off;
+            coverWake.observe(off);
         } catch (java.io.IOException ignored) {
             // keep the last state
         }
@@ -1015,22 +1025,15 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             // For a minute after a load iOS's display is kept on: a save taken asleep loads asleep, and one
             // taken awake goes to sleep a few seconds after the load (iOS's Auto-Lock counts the time away).
             // A press right at "running" is lost (iOS is busy for a while after a load): presses from 5 s
-            // after, 6 s apart, at most six; not after a side button press of the user's.
-            if (wakeAfterLoad && "running".equals(Guest.state) && Guest.qmp() != null) {
-                if (wakeAt == 0) {
-                    wakeAt = up + 5_000;
-                    wakeUntil = up + 60_000;
-                    wakePowerMs = Guest.lastPowerMs;
-                } else if (up >= wakeUntil || wakeTries >= 6
-                        || Guest.lastPowerMs != wakePowerMs && up - Guest.lastPowerMs < 10_000) {
+            // after, 6 s apart, at most six; not after a side button press of the user's (CoverWake: the app's own
+            // presses, taps on the cover too, are not the user's, and a press waits while another is on its way).
+            if (coverWake.autoWake() && "running".equals(Guest.state) && Guest.qmp() != null) {
+                CoverWake.Step step = coverWake.auto(up, displayOff, Guest.lastPowerMs);
+                if (step == CoverWake.Step.END) {
                     AppLog.note(this, "wake after a load: display " + (displayOff ? "off" : "on") + " after "
-                            + wakeTries + " press(es)");
-                    wakeAfterLoad = false;
-                } else if (displayOff && up >= wakeAt) {
+                            + coverWake.tries() + " press(es)");
+                } else if (step == CoverWake.Step.PRESS) {
                     wake();
-                    wakePowerMs = Guest.lastPowerMs;    // iOS 16's wake is the side button: ours, not the user's
-                    wakeTries++;
-                    wakeAt = up + 6_000;
                 }
             }
             if (displayOff) {
