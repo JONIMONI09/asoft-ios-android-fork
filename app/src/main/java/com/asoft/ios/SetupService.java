@@ -369,8 +369,7 @@ public class SetupService extends Service {
                         long free = getFilesDir().getUsableSpace();
                         long need = a26 ? PhoneSetup26.needBytes(this) : PhoneSetup.needBytes(this);
                         if (free < need) {
-                            throw new IOException(String.format(Locale.ROOT,
-                                    "Not enough room: %.1f GB free, about %.1f GB needed. Free some space, then tap Resume.", free / 1e9, need / 1e9));
+                            throw new IOException(OwnAnswer.noRoom(free, need));
                         }
                         // the helper VM gets every core, as Build-iOSDisk.ps1 gives it up to 8 (measured with 8)
                         if (a26) {
@@ -400,7 +399,9 @@ public class SetupService extends Service {
                         }
                         state.error = plain(e);
                         AppLog.note(this, "setup stopped: " + e);
-                        state.record = SetupRecord.write(this, a26, state.step, state.pct, state.text, e, state.error, logAt, stepSince, t0);
+                        // too little room is its own answer: the message alone, no log to share or report
+                        state.record = OwnAnswer.is(state.error) ? null
+                                : SetupRecord.write(this, a26, state.step, state.pct, state.text, e, state.error, logAt, stepSince, t0);
                         break;
                     } catch (RuntimeException e) {
                         // a bug of the app's: the setup stops with it, the app stays (a Resume tries again)

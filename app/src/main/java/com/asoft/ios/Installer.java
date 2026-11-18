@@ -294,7 +294,7 @@ final class Installer {
         for (int n = 0; n < len; ) {
             int r = in.read(b, n, len - n);
             if (r < 0) {
-                throw new IOException("the file ends early: incomplete copy?");
+                throw new IOException(OwnAnswer.FILE_ENDS_EARLY + ": incomplete copy?");
             }
             n += r;
         }
@@ -305,7 +305,7 @@ final class Installer {
         while (n > 0) {
             int r = in.read(b, 0, (int) Math.min(b.length, n));
             if (r < 0) {
-                throw new IOException("the file ends early");
+                throw new IOException(OwnAnswer.FILE_ENDS_EARLY);
             }
             n -= r;
         }
@@ -404,7 +404,7 @@ final class Installer {
                 while (left > 0) {
                     int r = in.read(buf, 0, (int) Math.min(buf.length, left));
                     if (r < 0) {
-                        throw new IOException("the file ends early: incomplete copy?");
+                        throw new IOException(OwnAnswer.FILE_ENDS_EARLY + ": incomplete copy?");
                     }
                     o.write(buf, 0, r);
                     left -= r;
