@@ -364,6 +364,7 @@ public class SetupService extends Service {
                     if (cancel) {
                         break;
                     }
+                    stopWhy = null;
                     try {
                         long free = getFilesDir().getUsableSpace();
                         long need = a26 ? PhoneSetup26.needBytes(this) : PhoneSetup.needBytes(this);
@@ -387,6 +388,12 @@ public class SetupService extends Service {
                     } catch (IOException e) {
                         if (cancel) {
                             break;
+                        }
+                        String waitFor = stopWhy;
+                        if (SetupStop.isOwnStop(e, waitFor)) {
+                            // a Pause, or no Wi-Fi or network, that is over by now (A#155): not an error
+                            AppLog.note(this, "setup: " + state.step + " stopped for " + waitFor + " (no error), going on");
+                            continue;
                         }
                         if (pause || noWifi() || noNetwork()) {
                             continue;       // the loop above waits; the next run goes on where this one stopped
@@ -445,16 +452,19 @@ public class SetupService extends Service {
      * want of Wi-Fi; a helper VM step only for Cancel (it would have to start over).
      */
     private boolean stopNow() {
-        if (cancel) {
-            return true;
-        }
-        boolean downloading = "ipsw".equals(state.step) || state.step.endsWith(":fetch");
+        String step = state.step;
+        boolean downloading = "ipsw".equals(step) || step.endsWith(":fetch");
         // a decrypt stops at its next cluster for Pause (it goes on from there); a helper job is held instead
-        if (state.step.endsWith(":decrypt") && pause) {
-            return true;
+        String why = SetupStop.reason(cancel, downloading, step.endsWith(":decrypt"), pause,
+                downloading && noWifi(), downloading && noNetwork());
+        if (why != null && !SetupStop.CANCEL.equals(why)) {
+            stopWhy = why;      // the worker's catch tells this wait from an error (SetupStop.isOwnStop)
         }
-        return downloading && (pause || noWifi() || noNetwork());
+        return why != null;
     }
+
+    /** What the last stopNow() that said stop gave as a wait reason (not a Cancel): reset before each run of the steps. */
+    private volatile String stopWhy;
 
     private PhoneSetup.Progress progress() {
         return new PhoneSetup.Progress() {
