@@ -20,6 +20,12 @@ same list in words.
 | OPPO CPH2159 | SM7125 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 55 minutes, up to 34 fps. |
 | Xiaomi 24040RN64Y | MT6769 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 2 h 25 min, up to 39 fps. |
 | Vivo V2250 | SM7325 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 1 h 55 min, up to 11 fps; free memory went down to 661 MB. |
+| Motorola moto g - 2026 | MT6835 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 37 fps; free memory went down to 182 MB. |
+| OPPO CPH2179 | mt6765 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 3 h 55 min, up to 36 fps, the reporter says it is very laggy and apps do not open by a tap; free memory went down to 333 MB. |
+| Samsung SM-S928B | SM8650 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 24 fps; the phone reached thermal status severe. |
+| Xiaomi 23122PCD1G | SM7435 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 9 fps; setup 3 h 6 min (disk build 1 h 39 min, first start 1 h 12 min). |
+| Xiaomi 25062RN2DY | SM6225 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 9 fps; setup 4 h 15 min (disk build 2 h 25 min, first start 1 h 20 min); free memory went down to 466 MB. |
+| Samsung SM-G975F | Exynos 9820 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 3 fps, very slow; setup 6 h 42 min (disk build 2 h 49 min, first start 3 h 39 min). |
 | any phone with an ARM Mali GPU | any | Mali | fails | no GPU needed | fails | Most fail the GPU check (no VK_EXT_external_memory_host); one that passes runs, slowly so far. |
 | any phone with an Imagination PowerVR GPU | any | PowerVR | fails | no GPU needed | fails | The GPU check fails (no VK_EXT_external_memory_host); not supported yet. |
 | any phone with a Samsung Xclipse GPU | any | Xclipse | fails | no GPU needed | fails | The GPU check fails or the picture is wrong; not supported yet. |

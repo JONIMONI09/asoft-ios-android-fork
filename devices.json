@@ -122,6 +122,54 @@
       "note": "one report: iOS 16 ran 1 h 55 min, up to 11 fps; free memory went down to 661 MB"
     },
     {
+      "soc": "MT6835",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Motorola moto g - 2026",
+      "note": "one report: iOS 16 ran 15 min, up to 37 fps; free memory went down to 182 MB"
+    },
+    {
+      "soc": "mt6765",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH2179",
+      "note": "one report: iOS 16 ran 3 h 55 min, up to 36 fps, the reporter says it is very laggy and apps do not open by a tap; free memory went down to 333 MB"
+    },
+    {
+      "soc": "SM8650",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S928B",
+      "note": "one report: iOS 16 ran 10 min, up to 24 fps; the phone reached thermal status severe"
+    },
+    {
+      "soc": "SM7435",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 23122PCD1G",
+      "note": "one report: iOS 16 ran 10 min, up to 9 fps; the setup took 3 h 6 min (disk build 1 h 39 min, first start 1 h 12 min)"
+    },
+    {
+      "soc": "SM6225",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 25062RN2DY",
+      "note": "one report: iOS 16 ran 10 min, up to 9 fps; the setup took 4 h 15 min (disk build 2 h 25 min, first start 1 h 20 min); free memory went down to 466 MB"
+    },
+    {
+      "soc": "Exynos 9820",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-G975F",
+      "note": "one report: iOS 16 ran 10 min, up to 3 fps, very slow; the setup took 6 h 42 min (disk build 2 h 49 min, first start 3 h 39 min)"
+    },
+    {
       "soc": "",
       "gpu": "Mali",
       "os": ["ios26", "watch"],
