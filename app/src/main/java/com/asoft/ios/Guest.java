@@ -303,7 +303,9 @@ final class Guest {
 
     /** Why the last start did not happen (no room, ...), for the screens; null once a start is under way. */
     static volatile String startError;
-    private static int pid = -1;
+    private static volatile int pid = -1;
+    /** The pid of the QEMU a setup started (-1: none); SetupOwner says whether the running QEMU is that one. */
+    private static volatile int setupPid = -1;
     private static volatile Qmp qmp;
     static volatile String state = "stopped";
     /** What a start does before QEMU runs when it takes a while (state "preparing"), for the screen; else null. */
@@ -1465,6 +1467,23 @@ final class Guest {
     static volatile boolean aod26;
     private static final int AOD_SAVED = 0x80;
 
+    /**
+     * The running QEMU is a setup's (iOS 26 / watch setup boots, the iOS 16 first start): the user's Save and close,
+     * Turn off and the notification's button leave it alone, the setup ends it itself (A#172). Does not wait for
+     * Guest's lock (a start holds it for as long as QEMU takes to come up): the screens ask this on the UI thread.
+     */
+    static boolean setupOwns() {
+        int p = pid;
+        return SetupOwner.owns(setupPid, p, p > 0 && Render.alive(p));
+    }
+
+    /** iOS 16's first start for a setup: start(c, null), and the QEMU it made is the setup's. */
+    static synchronized void startForSetup(Context c) throws IOException {
+        setupPid = -1;
+        start(c, null);
+        setupPid = pid;
+    }
+
     static synchronized boolean running() {
         boolean a = Render.alive(pid);
         if (!a && pid > 0) {
@@ -1824,6 +1843,7 @@ final class Guest {
         if (running()) {
             throw new IOException("iOS is running already");
         }
+        setupPid = -1;      // the user's start: the setup's QEMU (if any) is gone
         if (qmp != null) {
             qmp.close();                // of a QEMU that is gone
             qmp = null;
@@ -2046,8 +2066,10 @@ final class Guest {
         File links = Emu.linkLibraries(c);
         writeResolvConf(c);
         setupBoot = b;
+        setupPid = -1;
         try {
             start26(c, links, null);
+            setupPid = pid;     // (setupBoot is only set during the start: this is what tells later that the QEMU is a setup's)
         } finally {
             setupBoot = null;
         }

@@ -917,6 +917,10 @@ public class MainActivity extends Activity {
     }
 
     private void askTurnOff() {
+        if (Guest.setupOwns()) {
+            Toast.makeText(this, SetupOwner.BUSY, Toast.LENGTH_LONG).show();
+            return;
+        }
         new Thread(() -> {
             // the quick save's time for the text (from QEMU: off the UI thread)
             Guest.Snap quick = Guest.newestQuick(Guest.snapshots(this));
@@ -929,7 +933,7 @@ public class MainActivity extends Activity {
                         .setTitle("Turn off " + (os == Guest.WATCH ? "watchOS" : "iOS") + "?")
                         .setMessage(ScreenActivity.turnOffText(os, quick))
                         .setPositiveButton("Turn off", (d, w) -> {
-                            if (Guest.running()) {
+                            if (Guest.running() && !Guest.setupOwns()) {
                                 GuestService.powerOff(this);
                             }
                         })
@@ -1170,7 +1174,7 @@ public class MainActivity extends Activity {
         boolean there = installed(c.os);
         c.primary.setText(primary);
         fill(c.primary, !there);
-        c.secondary.setVisibility(up ? View.VISIBLE : View.GONE);
+        c.secondary.setVisibility(up && !Guest.setupOwns() ? View.VISIBLE : View.GONE);
         c.menu.setVisibility(there ? View.VISIBLE : View.INVISIBLE);
     }
 

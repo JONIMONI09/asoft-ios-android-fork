@@ -200,7 +200,7 @@ final class PhoneSetup {
         // Guest.start is what GuestService runs for a boot; the screen attaches to it if the user opens iOS.
         Guest.select(c, Guest.IOS16);
         Guest.startError = null;
-        Guest.start(c, null);
+        Guest.startForSetup(c);
         boolean offSeen = false, up = false;
         FirstStartWatch watch = new FirstStartWatch(t0);
         long at = 0;

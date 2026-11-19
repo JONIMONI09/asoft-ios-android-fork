@@ -534,6 +534,11 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         if (Guest.saving() || closing) {
             return;
         }
+        if (Guest.setupOwns()) {
+            // Save now, Save and close, Turn off and Load would all end or pause the setup's QEMU (A#172)
+            toast(SetupOwner.BUSY);
+            return;
+        }
         new Thread(() -> {
             java.util.List<Guest.Snap> list = Guest.snapshots(this);
             boolean wayBack = Guest.quickStale(this, Guest.os(this));
@@ -728,6 +733,10 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                     if (!Guest.running() || Guest.saving() || closing) {
                         return;
                     }
+                    if (Guest.setupOwns()) {
+                        toast(SetupOwner.BUSY);
+                        return;
+                    }
                     closing = true;
                     closingOff = true;
                     GuestService.powerOff(this);
@@ -786,6 +795,10 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
 
     /** Quick boot: keep iOS as it is, close; the next start goes on from here. */
     private void saveAndClose() {
+        if (Guest.setupOwns()) {
+            toast(SetupOwner.BUSY);
+            return;
+        }
         if (!Guest.running()) {
             finishAndRemoveTask();
             return;
