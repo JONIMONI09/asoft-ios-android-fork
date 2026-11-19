@@ -167,7 +167,55 @@
       "os": ["ios16"],
       "state": "works",
       "phone": "Samsung SM-G975F",
-      "note": "one report: iOS 16 ran 10 min, up to 3 fps, very slow; the setup took 6 h 42 min (disk build 2 h 49 min, first start 3 h 39 min)"
+      "note": "two reports: iOS 16 ran 10 min, up to 3 fps, very slow; the setup took 6 h 42 min (disk build 2 h 49 min, first start 3 h 39 min). A Samsung SM-G977N ran it 30 min, up to 24 fps, thermal status critical"
+    },
+    {
+      "soc": "SM6475",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 25098RA98G",
+      "note": "one report: iOS 16 ran 10 min, up to 15 fps; the setup took 4 h 9 min (disk build 2 h 29 min, first start 1 h 18 min); free memory went down to 266 MB"
+    },
+    {
+      "soc": "Exynos 2100",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-G998B",
+      "note": "one report: iOS 16 ran 25 min after a save was loaded, but only up to 1 fps, barely usable"
+    },
+    {
+      "soc": "s5e9945",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S721B",
+      "note": "one report: iOS 16 ran 20 min, up to 51 fps; free memory went down to 722 MB. A Samsung SM-S921B (Galaxy S24) reached the home screen too, laggy"
+    },
+    {
+      "soc": "Exynos 850",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-A127F",
+      "note": "one report: iOS 16 ran 40 min, up to 26 fps; free memory went down to 160 MB"
+    },
+    {
+      "soc": "Tensor G4",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Google Pixel 9a",
+      "note": "one report: iOS 16 ran 55 min, up to 45 fps; free memory went down to 109 MB"
+    },
+    {
+      "soc": "MT8788",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Blackview BV5300 Plus",
+      "note": "one report: iOS 16 ran 15 min, up to 6 fps; the setup took 16 h 51 min (disk build 12 h 57 min, first start 3 h 1 min)"
     },
     {
       "soc": "",
