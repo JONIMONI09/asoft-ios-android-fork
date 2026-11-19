@@ -15,6 +15,9 @@ final class OwnAnswer {
     /** What the three reads of Installer say when a bundle file runs out before its tar does (an empty or cut-short file). */
     static final String FILE_ENDS_EARLY = "the file ends early";
 
+    /** What Installer says when the first tar header of a picked file does not check out: the file is no setup bundle at all (A#171). */
+    static final String NOT_A_BUNDLE = "not a setup file";
+
     private OwnAnswer() {}
 
     /** The setup's "not enough room" message, from the bytes free and the bytes the run needs. */
@@ -25,7 +28,7 @@ final class OwnAnswer {
 
     /** Whether @message is one of these answers: a stop that gets no record. False for null and for every other message. */
     static boolean is(String message) {
-        return message != null && (message.startsWith(NO_ROOM) || message.contains(FILE_ENDS_EARLY));
+        return message != null && (message.startsWith(NO_ROOM) || message.contains(FILE_ENDS_EARLY) || message.contains(NOT_A_BUNDLE));
     }
 
     /** The import's status line for a failure with @message: the empty or short file gets its own words, the rest "Not set up: " + message. */
@@ -33,6 +36,11 @@ final class OwnAnswer {
         if (message != null && message.contains(FILE_ENDS_EARLY)) {
             return "Not set up: the file is empty or ends early. Use the .asoft file that the PC version of ASoftware made "
                     + "(Send-ToPhone.cmd) and copy it to the phone again. Without a PC, use Set up in the iOS 16 or iOS 26 part: "
+                    + "the phone downloads iOS from Apple itself.";
+        }
+        if (message != null && message.contains(NOT_A_BUNDLE)) {
+            return "Not set up: this is not a setup file. Use the .asoft file that the PC version of ASoftware made "
+                    + "(Send-ToPhone.cmd). Without a PC, use Set up in the iOS 16 or iOS 26 part: "
                     + "the phone downloads iOS from Apple itself.";
         }
         return "Not set up: " + message;

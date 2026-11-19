@@ -323,18 +323,6 @@ final class Installer {
         return new String(h, at, n, StandardCharsets.UTF_8).trim();
     }
 
-    private static long size(byte[] h) {
-        if ((h[124] & 0x80) != 0) {         // GNU base-256
-            long v = 0;
-            for (int i = 125; i < 136; i++) {
-                v = (v << 8) | (h[i] & 0xff);
-            }
-            return v;
-        }
-        String s = field(h, 124, 12);
-        return s.isEmpty() ? 0 : Long.parseLong(s, 8);
-    }
-
     private static void untar(InputStream in, File dir, long total, Progress p, ManifestHook hook) throws IOException {
         byte[] h = new byte[512];
         long done = 0;
@@ -343,6 +331,7 @@ final class Installer {
         byte[] buf = new byte[1 << 20];
         while (true) {
             readFully(in, h, 512);
+            boolean first = done == 0;
             done += 512;
             boolean zero = true;
             for (byte x : h) {
@@ -356,10 +345,14 @@ final class Installer {
             if (!prefix.isEmpty() && "ustar".equals(field(h, 257, 6))) {
                 name = prefix + "/" + name;
             }
-            long size = size(h);
+            long size = TarHeader.checkedSize(h, first, done - 512);
             char type = (char) h[156];
             long padded = (size + 511) & ~511L;
             if (type == 'x' || type == 'g') {
+                if (size > (1 << 20)) {
+                    throw new IOException("the setup file is damaged: the tar header at byte " + (done - 512) + " has a pax record of "
+                            + size + " bytes");
+                }
                 byte[] pax = new byte[(int) size];
                 readFully(in, pax, (int) size);
                 skip(in, padded - size);
@@ -372,7 +365,11 @@ final class Installer {
                         }
                         String key = rec.substring(sp + 1, eq), val = rec.substring(eq + 1);
                         if (key.equals("size")) {
-                            paxSize = Long.parseLong(val);
+                            try {
+                                paxSize = Long.parseLong(val.trim());
+                            } catch (NumberFormatException e) {
+                                throw new IOException("the setup file is damaged: a pax size record is no number");
+                            }
                         } else if (key.equals("path")) {
                             paxPath = val;
                         }
