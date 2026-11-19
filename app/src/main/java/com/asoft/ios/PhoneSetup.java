@@ -275,7 +275,7 @@ final class PhoneSetup {
     private static String end(Context c) {
         String r = Guest.running() ? Guest.saveAndQuit(c) : "not running";
         if (!Guest.running()) {
-            Render.closeGuestRam();
+            Guest.closeRam();
         }
         return r;
     }

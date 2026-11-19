@@ -304,6 +304,49 @@ final class Guest {
     /** Why the last start did not happen (no room, ...), for the screens; null once a start is under way. */
     static volatile String startError;
     private static volatile int pid = -1;
+    /** Moves on with every create and close of iOS 16's guest RAM memfd (RamRelease): a late release must not wipe a newer one. */
+    private static final java.util.concurrent.atomic.AtomicInteger ramGen = new java.util.concurrent.atomic.AtomicInteger();
+
+    static int createRam(long size) {
+        ramGen.incrementAndGet();
+        return Render.createGuestRam(size);
+    }
+
+    static void closeRam() {
+        ramGen.incrementAndGet();
+        Render.closeGuestRam();
+    }
+
+    /**
+     * After stop() ended iOS 16's QEMU: waits (a daemon thread, up to 60 s) until pid @p is gone (alive() reaps it) and then
+     * gives the guest RAM's pages back, unless a newer RAM exists or a QEMU runs by then (RamRelease).
+     */
+    private static void releaseRamWhenGone(int p, int gen) {
+        Thread t = new Thread(() -> {
+            for (int i = 0; i < 300 && Render.alive(p); i++) {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+            if (Render.alive(p)) {
+                return;     // still there after 60 s: the next start or stopAndWait cleans up
+            }
+            synchronized (Guest.class) {
+                if (RamRelease.shouldRelease(gen, ramGen.get(), pid > 0 && Render.alive(pid))) {
+                    Render.releaseGuestRam();
+                    Context c = appContext;
+                    if (c != null) {
+                        AppLog.note(c, "stop: QEMU " + p + " is gone, its guest RAM goes back to the phone");
+                    }
+                }
+            }
+        }, "ram-release");
+        t.setDaemon(true);
+        t.start();
+    }
+
     /** The pid of the QEMU a setup started (-1: none); SetupOwner says whether the running QEMU is that one. */
     private static volatile int setupPid = -1;
     private static volatile Qmp qmp;
@@ -1900,7 +1943,7 @@ final class Guest {
         try (java.io.RandomAccessFile o = new java.io.RandomAccessFile(ledsFile(c), "rw")) {
             o.write(resumed ? savedLeds(c, loadTag) : 0);
         }
-        int ramFd = Render.createGuestRam(RAM_SIZE);
+        int ramFd = createRam(RAM_SIZE);
         if (ramFd < 0) {
             throw new IOException("no memfd for the guest's RAM");
         }
@@ -2176,7 +2219,7 @@ final class Guest {
         try (java.io.RandomAccessFile o = new java.io.RandomAccessFile(ledsFile(c), "rw")) {
             o.write(leds & ~AOD_SAVED);
         }
-        Render.closeGuestRam();     // iOS 16's, if it ran before: QEMU makes iOS 26's own
+        closeRam();     // iOS 16's, if it ran before: QEMU makes iOS 26's own
         File icd = writeVulkanIcd(c, links);
         List<String> extra = new ArrayList<>();
         // ios26.txt (debug builds) is iOS 26's: the watch takes none of it
@@ -2709,12 +2752,17 @@ final class Guest {
             return;
         }
         endingPid = pid;
-        Render.terminate(pid);
+        int p = pid;
+        int gen = ramGen.get();
+        Render.terminate(p);
         if (qmp != null) {
             qmp.close();
             qmp = null;
         }
         pid = -1;
         state = "stopped";
+        if (p > 0) {
+            releaseRamWhenGone(p, gen);
+        }
     }
 }
