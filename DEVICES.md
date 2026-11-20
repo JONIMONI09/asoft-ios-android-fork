@@ -7,6 +7,7 @@ same list in words.
 | --- | --- | --- | --- | --- | --- | --- |
 | Samsung SM-S938B (Galaxy S25 Ultra) | SM8750 | Adreno 830 | works | works | works | Galaxy S25 Ultra |
 | Xiaomi 25102PCBEG | SM8850 | Adreno 840 | works | not reported | not reported | One report: ran 10 minutes at the 2x screen, up to 46 fps. |
+| Xiaomi 25053PC47I | SM8735 | Adreno 825 | works | not reported | not reported | One report: ran 25 minutes at the 2x screen, up to 53 fps; setup 4 h 18 min. |
 | HUAWEI LMR-LX9 | Kirin | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 25 fps; setup 4 h 18 min (first start 2 h 20 min). The app reads only "Kirin" as this phone's SoC, so the row covers every phone that reports it. |
 | Xiaomi Pad 7 2410CRP4CG | SM7675 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 21 fps; setup 1 h 19 min (first start 37 min). |
 | Samsung SM-A556B | s5e8845 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 12 fps, it lags; setup 5 h 35 min (disk build 4 h 22 min, first start 1 h 1 min). |
@@ -32,6 +33,9 @@ same list in words.
 | Samsung SM-A127F | Exynos 850 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 40 minutes, up to 26 fps; free memory went down to 160 MB. |
 | Google Pixel 9a | Tensor G4 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 55 minutes, up to 45 fps; free memory went down to 109 MB. |
 | Blackview BV5300 Plus | MT8788 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 6 fps; setup 16 h 51 min (disk build 12 h 57 min, first start 3 h 1 min). |
+| Samsung SM-A576B | s5e8865 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 32 fps; free memory went down to 668 MB. |
+| Infinix X6528 | T606 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 1 h 5 min, up to 26 fps; setup 5 h 30 min (disk build 2 h 43 min, first start 2 h 5 min). |
+| itel S665L | T606/T616/T7200/T7250 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 4 h 55 min, up to 35 fps; free memory went down to 707 MB. The app reads this chip's whole family name as the SoC, so the row covers every phone that reports it. |
 | any phone with an ARM Mali GPU | any | Mali | fails | no GPU needed | fails | Most fail the GPU check (no VK_EXT_external_memory_host); one that passes runs, slowly so far. |
 | any phone with an Imagination PowerVR GPU | any | PowerVR | fails | no GPU needed | fails | The GPU check fails (no VK_EXT_external_memory_host); not supported yet. |
 | any phone with a Samsung Xclipse GPU | any | Xclipse | fails | no GPU needed | fails | The GPU check fails or the picture is wrong; not supported yet. |

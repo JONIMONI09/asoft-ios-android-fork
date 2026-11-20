@@ -18,6 +18,14 @@
       "note": "one report: ran 10 min at the 2x screen, up to 46 fps; iOS 16 and watchOS not reported yet"
     },
     {
+      "soc": "SM8735",
+      "gpu": "Adreno (TM) 825",
+      "os": ["ios26"],
+      "state": "works",
+      "phone": "Xiaomi 25053PC47I",
+      "note": "one report: ran 25 min at the 2x screen, up to 53 fps; the setup took 4 h 18 min; iOS 16 and watchOS not reported yet"
+    },
+    {
       "soc": "Kirin",
       "gpu": "",
       "os": ["ios16"],
@@ -216,6 +224,30 @@
       "state": "works",
       "phone": "Blackview BV5300 Plus",
       "note": "one report: iOS 16 ran 15 min, up to 6 fps; the setup took 16 h 51 min (disk build 12 h 57 min, first start 3 h 1 min)"
+    },
+    {
+      "soc": "s5e8865",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-A576B",
+      "note": "one report: iOS 16 ran 15 min, up to 32 fps; free memory went down to 668 MB"
+    },
+    {
+      "soc": "T606",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Infinix X6528",
+      "note": "one report: iOS 16 ran 1 h 5 min, up to 26 fps; the setup took 5 h 30 min (disk build 2 h 43 min, first start 2 h 5 min)"
+    },
+    {
+      "soc": "T606/T616/T7200/T7250",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "itel S665L",
+      "note": "one report: iOS 16 ran 4 h 55 min, up to 35 fps; free memory went down to 707 MB; the app reads this chip's whole family name as the SoC, so the row covers every phone that reports it"
     },
     {
       "soc": "",
