@@ -36,6 +36,7 @@ same list in words.
 | Samsung SM-A576B | s5e8865 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 32 fps; free memory went down to 668 MB. |
 | Infinix X6528 | T606 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 1 h 5 min, up to 26 fps; setup 5 h 30 min (disk build 2 h 43 min, first start 2 h 5 min). |
 | itel S665L | T606/T616/T7200/T7250 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 4 h 55 min, up to 35 fps; free memory went down to 707 MB. The app reads this chip's whole family name as the SoC, so the row covers every phone that reports it. |
+| Samsung SM-S942B | s5e9965 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 31 fps; setup 1 h 40 min (disk build 28 min, first start 27 min); free memory went down to 788 MB. |
 | any phone with an ARM Mali GPU | any | Mali | fails | no GPU needed | fails | Most fail the GPU check (no VK_EXT_external_memory_host); one that passes runs, slowly so far. |
 | any phone with an Imagination PowerVR GPU | any | PowerVR | fails | no GPU needed | fails | The GPU check fails (no VK_EXT_external_memory_host); not supported yet. |
 | any phone with a Samsung Xclipse GPU | any | Xclipse | fails | no GPU needed | fails | The GPU check fails or the picture is wrong; not supported yet. |

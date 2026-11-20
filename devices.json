@@ -250,6 +250,14 @@
       "note": "one report: iOS 16 ran 4 h 55 min, up to 35 fps; free memory went down to 707 MB; the app reads this chip's whole family name as the SoC, so the row covers every phone that reports it"
     },
     {
+      "soc": "s5e9965",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S942B",
+      "note": "one report: iOS 16 ran 15 min, up to 31 fps; the setup took 1 h 40 min (disk build 28 min, first start 27 min); free memory went down to 788 MB"
+    },
+    {
       "soc": "",
       "gpu": "Mali",
       "os": ["ios26", "watch"],
