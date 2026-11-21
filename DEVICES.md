@@ -7,6 +7,7 @@ same list in words.
 | --- | --- | --- | --- | --- | --- | --- |
 | Samsung SM-S938B (Galaxy S25 Ultra) | SM8750 | Adreno 830 | works | works | works | Galaxy S25 Ultra |
 | Xiaomi 25102PCBEG | SM8850 | Adreno 840 | works | not reported | not reported | One report: ran 10 minutes at the 2x screen, up to 46 fps. |
+| Xiaomi 25053PC47I | SM8735 | Adreno 825 | works | not reported | not reported | One report: ran 25 minutes at the 2x screen, up to 53 fps in its busiest second (the reporter saw 3 to 5 fps most of the time); setup 4 h 18 min. |
 | HUAWEI LMR-LX9 | Kirin | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 25 fps; setup 4 h 18 min (first start 2 h 20 min). The app reads only "Kirin" as this phone's SoC, so the row covers every phone that reports it. |
 | Xiaomi Pad 7 2410CRP4CG | SM7675 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 21 fps; setup 1 h 19 min (first start 37 min). |
 | Samsung SM-A556B | s5e8845 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 12 fps, it lags; setup 5 h 35 min (disk build 4 h 22 min, first start 1 h 1 min). |
@@ -20,6 +21,25 @@ same list in words.
 | OPPO CPH2159 | SM7125 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 55 minutes, up to 34 fps. |
 | Xiaomi 24040RN64Y | MT6769 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 2 h 25 min, up to 39 fps. |
 | Vivo V2250 | SM7325 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 1 h 55 min, up to 11 fps; free memory went down to 661 MB. |
+| Motorola moto g - 2026 | MT6835 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 37 fps; free memory went down to 182 MB. |
+| OPPO CPH2179 | mt6765 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 3 h 55 min, up to 36 fps, the reporter says it is very laggy and apps do not open by a tap; free memory went down to 333 MB. |
+| Samsung SM-S928B | SM8650 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 24 fps; the phone reached thermal status severe. |
+| Xiaomi 23122PCD1G | SM7435 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 9 fps; setup 3 h 6 min (disk build 1 h 39 min, first start 1 h 12 min). |
+| Xiaomi 25062RN2DY | SM6225 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 9 fps; setup 4 h 15 min (disk build 2 h 25 min, first start 1 h 20 min); free memory went down to 466 MB. |
+| Samsung SM-G975F | Exynos 9820 | not used by iOS 16 | not reported | works | not reported | Two reports: iOS 16 ran 10 minutes, up to 3 fps, very slow; setup 6 h 42 min (disk build 2 h 49 min, first start 3 h 39 min). A Samsung SM-G977N ran it 30 minutes, up to 24 fps, thermal status critical. |
+| Xiaomi 25098RA98G | SM6475 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 15 fps; setup 4 h 9 min (disk build 2 h 29 min, first start 1 h 18 min); free memory went down to 266 MB. |
+| Samsung SM-G998B | Exynos 2100 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 25 minutes after a save was loaded, but only up to 1 fps, barely usable. |
+| Samsung SM-S721B | s5e9945 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 20 minutes, up to 51 fps; free memory went down to 722 MB. A Samsung SM-S921B (Galaxy S24) reached the home screen too, laggy. |
+| Samsung SM-A127F | Exynos 850 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 40 minutes, up to 26 fps; free memory went down to 160 MB. |
+| Google Pixel 9a | Tensor G4 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 55 minutes, up to 45 fps; free memory went down to 109 MB. |
+| Blackview BV5300 Plus | MT8788 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 6 fps; setup 16 h 51 min (disk build 12 h 57 min, first start 3 h 1 min). |
+| Samsung SM-A576B | s5e8865 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 32 fps; free memory went down to 668 MB. |
+| Infinix X6528 | T606 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 1 h 5 min, up to 26 fps; setup 5 h 30 min (disk build 2 h 43 min, first start 2 h 5 min). |
+| itel S665L | T606/T616/T7200/T7250 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 4 h 55 min, up to 35 fps; free memory went down to 707 MB. The app reads this chip's whole family name as the SoC, so the row covers every phone that reports it. |
+| Samsung SM-S942B | s5e9965 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 31 fps; setup 1 h 40 min (disk build 28 min, first start 27 min); free memory went down to 788 MB. |
+| HONOR DNY-NX9 | SM7550 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 10 minutes, up to 13 fps; free memory went down to 1080 MB. |
+| Google Pixel 10 Pro | Tensor G5 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 15 minutes, up to 35 fps; setup 3 h 53 min (disk build 2 h 53 min, first start 47 min); free memory went down to 2804 MB. |
+| OPPO CPH1911 | mt6771 | not used by iOS 16 | not reported | works | not reported | One report: iOS 16 ran 55 minutes on Android 10, up to 27 fps; this CPU has no native mode, so iOS runs the slow way; free memory went down to 520 MB. |
 | any phone with an ARM Mali GPU | any | Mali | fails | no GPU needed | fails | Most fail the GPU check (no VK_EXT_external_memory_host); one that passes runs, slowly so far. |
 | any phone with an Imagination PowerVR GPU | any | PowerVR | fails | no GPU needed | fails | The GPU check fails (no VK_EXT_external_memory_host); not supported yet. |
 | any phone with a Samsung Xclipse GPU | any | Xclipse | fails | no GPU needed | fails | The GPU check fails or the picture is wrong; not supported yet. |

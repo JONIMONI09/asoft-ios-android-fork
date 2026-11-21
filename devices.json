@@ -18,6 +18,14 @@
       "note": "one report: ran 10 min at the 2x screen, up to 46 fps; iOS 16 and watchOS not reported yet"
     },
     {
+      "soc": "SM8735",
+      "gpu": "Adreno (TM) 825",
+      "os": ["ios26"],
+      "state": "works",
+      "phone": "Xiaomi 25053PC47I",
+      "note": "one report: ran 25 min at the 2x screen, up to 53 fps in its busiest second (the reporter saw 3 to 5 fps most of the time); the setup took 4 h 18 min; iOS 16 and watchOS not reported yet"
+    },
+    {
       "soc": "Kirin",
       "gpu": "",
       "os": ["ios16"],
@@ -120,6 +128,158 @@
       "state": "works",
       "phone": "Vivo V2250",
       "note": "one report: iOS 16 ran 1 h 55 min, up to 11 fps; free memory went down to 661 MB"
+    },
+    {
+      "soc": "MT6835",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Motorola moto g - 2026",
+      "note": "one report: iOS 16 ran 15 min, up to 37 fps; free memory went down to 182 MB"
+    },
+    {
+      "soc": "mt6765",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH2179",
+      "note": "one report: iOS 16 ran 3 h 55 min, up to 36 fps, the reporter says it is very laggy and apps do not open by a tap; free memory went down to 333 MB"
+    },
+    {
+      "soc": "SM8650",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S928B",
+      "note": "one report: iOS 16 ran 10 min, up to 24 fps; the phone reached thermal status severe"
+    },
+    {
+      "soc": "SM7435",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 23122PCD1G",
+      "note": "one report: iOS 16 ran 10 min, up to 9 fps; the setup took 3 h 6 min (disk build 1 h 39 min, first start 1 h 12 min)"
+    },
+    {
+      "soc": "SM6225",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 25062RN2DY",
+      "note": "one report: iOS 16 ran 10 min, up to 9 fps; the setup took 4 h 15 min (disk build 2 h 25 min, first start 1 h 20 min); free memory went down to 466 MB"
+    },
+    {
+      "soc": "Exynos 9820",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-G975F",
+      "note": "two reports: iOS 16 ran 10 min, up to 3 fps, very slow; the setup took 6 h 42 min (disk build 2 h 49 min, first start 3 h 39 min). A Samsung SM-G977N ran it 30 min, up to 24 fps, thermal status critical"
+    },
+    {
+      "soc": "SM6475",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Xiaomi 25098RA98G",
+      "note": "one report: iOS 16 ran 10 min, up to 15 fps; the setup took 4 h 9 min (disk build 2 h 29 min, first start 1 h 18 min); free memory went down to 266 MB"
+    },
+    {
+      "soc": "Exynos 2100",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-G998B",
+      "note": "one report: iOS 16 ran 25 min after a save was loaded, but only up to 1 fps, barely usable"
+    },
+    {
+      "soc": "s5e9945",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S721B",
+      "note": "one report: iOS 16 ran 20 min, up to 51 fps; free memory went down to 722 MB. A Samsung SM-S921B (Galaxy S24) reached the home screen too, laggy"
+    },
+    {
+      "soc": "Exynos 850",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-A127F",
+      "note": "one report: iOS 16 ran 40 min, up to 26 fps; free memory went down to 160 MB"
+    },
+    {
+      "soc": "Tensor G4",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Google Pixel 9a",
+      "note": "one report: iOS 16 ran 55 min, up to 45 fps; free memory went down to 109 MB"
+    },
+    {
+      "soc": "MT8788",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Blackview BV5300 Plus",
+      "note": "one report: iOS 16 ran 15 min, up to 6 fps; the setup took 16 h 51 min (disk build 12 h 57 min, first start 3 h 1 min)"
+    },
+    {
+      "soc": "s5e8865",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-A576B",
+      "note": "one report: iOS 16 ran 15 min, up to 32 fps; free memory went down to 668 MB"
+    },
+    {
+      "soc": "T606",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Infinix X6528",
+      "note": "one report: iOS 16 ran 1 h 5 min, up to 26 fps; the setup took 5 h 30 min (disk build 2 h 43 min, first start 2 h 5 min)"
+    },
+    {
+      "soc": "T606/T616/T7200/T7250",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "itel S665L",
+      "note": "one report: iOS 16 ran 4 h 55 min, up to 35 fps; free memory went down to 707 MB; the app reads this chip's whole family name as the SoC, so the row covers every phone that reports it"
+    },
+    {
+      "soc": "s5e9965",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Samsung SM-S942B",
+      "note": "one report: iOS 16 ran 15 min, up to 31 fps; the setup took 1 h 40 min (disk build 28 min, first start 27 min); free memory went down to 788 MB"
+    },
+    {
+      "soc": "SM7550",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "HONOR DNY-NX9",
+      "note": "one report: iOS 16 ran 10 min, up to 13 fps; free memory went down to 1080 MB"
+    },
+    {
+      "soc": "Tensor G5",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Google Pixel 10 Pro",
+      "note": "one report: iOS 16 ran 15 min, up to 35 fps; the setup took 3 h 53 min (disk build 2 h 53 min, first start 47 min); free memory went down to 2804 MB"
+    },
+    {
+      "soc": "mt6771",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH1911",
+      "note": "one report: iOS 16 ran 55 min on Android 10, up to 27 fps; this CPU has no native mode, so iOS runs the slow way; free memory went down to 520 MB"
     },
     {
       "soc": "",
