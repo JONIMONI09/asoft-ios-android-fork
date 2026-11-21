@@ -110,19 +110,13 @@ Nothing in it is specific to one phone. It is developed and measured on a Galaxy
 8 Elite, 12 GB RAM); everything else in [DEVICES.md](DEVICES.md) comes from users' reports.
 
 - **CPU.** The native EL0 engine runs iOS's own code on the phone's CPU when the cores have LSE atomics,
-  RDM, dot product, FP16 (scalar and SIMD), RCpc and DC CVAP (`atomics asimdrdm asimddp fphp asimdhp
-  lrcpc dcpop` in `/proc/cpuinfo`). Without them QEMU emulates everything. Speed is mostly the big
-  cores: a phone with half its cores small is slower whatever its ARM version.
-- **Pointer authentication** is not needed on the phone: iOS 26 and watchOS are arm64e, and the engine
-  handles their PAC instructions on CPUs without it (a Snapdragon 888 phone without PAC has finished the
-  whole iOS 26 setup).
+  RDM, dot product, FP16, RCpc and DC CVAP. Without them QEMU emulates everything. Speed is mostly the
+  big cores: a phone with half its cores small is slower whatever its ARM version.
 - **GPU.** iOS 26 and watchOS draw through the phone's GPU. On an Adreno the app uses Mesa's Turnip,
   which it carries. Without sparse binds from host memory the GPU runs in the compatibility mode.
   A phone without an Adreno passes the check only when its own Vulkan driver lacks nothing but sparse
-  binds; that route is experimental. On Adreno 6xx phones with an older kernel (msm-5.4 and older) the
-  GPU driver refuses the app's memory in 0.1.6; the pre-release
-  [v0.1.6-kgsl1](https://github.com/alpersamur3/asoft-ios-android/releases/tag/v0.1.6-kgsl1) fixes that.
-- **RAM.** iOS 16 asks for 7 GB and touches about 2.7 GB of it. iOS 26's memory is 3, 4 or 6 GB and
+  binds; that route is experimental.
+- **RAM.** iOS 26's memory is 3, 4 or 6 GB and
   watchOS's 2 or 3 GB, set in their menu on the home screen; the smaller ones are the default on a phone
   under 10 GB. Below 7 GB of phone RAM (iOS 26) or 5 GB (watchOS) the app warns but does not refuse.
   On the S25 Ultra iOS 26 left Android 1.5 GB at 3 GB and 0.8 to 1.0 GB at 6 GB.
@@ -229,8 +223,7 @@ XNU's kernel, but the iOS processes themselves run on the phone's CPU: the nativ
 each iOS address space into a helper process and runs its arm64 code there, trapping to QEMU for
 system calls and page faults. On CPUs without the ARMv8.2 features above the engine stays off and QEMU
 emulates everything. iOS 16's screen is read straight from the guest's RAM into a GLES texture each
-display frame; iOS 26's and watchOS's frames come from reims-vgpu through a frame file descriptor.
-Input goes over QMP.
+display frame. Input goes over QMP.
 
 ## Building
 
