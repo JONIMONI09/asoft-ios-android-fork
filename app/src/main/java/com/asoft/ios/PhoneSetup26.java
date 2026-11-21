@@ -103,6 +103,10 @@ final class PhoneSetup26 {
         }
     }
 
+    private static void clearDone(Context c, String group, String step) {
+        mark(c, group, step).delete();
+    }
+
     /** The group is installed in the app (its pack step is done and its folder has its disk). */
     static boolean installed(Context c, String group) {
         return IOS26.equals(group) ? new File(c.getFilesDir(), "ios26/" + Guest.AOD26_BASE).isFile() && done(c, IOS26, "pack")
@@ -258,7 +262,10 @@ final class PhoneSetup26 {
         sampler.start();
         try {
             for (String g : groups(c)) {
-                for (String[] s : steps(g)) {
+                boolean refetched = false;
+                String[][] all = steps(g);
+                for (int i = 0; i < all.length; i++) {
+                    String[] s = all[i];
                     if (done(c, g, s[0])) {
                         continue;
                     }
@@ -272,7 +279,18 @@ final class PhoneSetup26 {
                     }
                     long t0 = System.currentTimeMillis();
                     p.step(g + ":" + s[0], 0, s[1]);
-                    step(c, m, g, s[0], cpus, p, cancelled, current);
+                    try {
+                        step(c, m, g, s[0], cpus, p, cancelled, current);
+                    } catch (Refetch r) {
+                        // the decrypt dropped a file that cannot go on (A#247) and cleared the group's fetch step: back to it, once
+                        if (refetched) {
+                            throw r;
+                        }
+                        refetched = true;
+                        AppLog.note(c, "setup26: " + r.getMessage());
+                        i = -1;
+                        continue;
+                    }
                     setDone(c, g, s[0]);
                     AppLog.note(c, String.format(Locale.ROOT, "setup26: %s:%s done in %d s, %.1f GB free (lowest %.1f)", g, s[0],
                             (System.currentTimeMillis() - t0) / 1000, c.getFilesDir().getUsableSpace() / 1e9, lowestFree / 1e9));
@@ -497,6 +515,38 @@ final class PhoneSetup26 {
         return Unpack.keySource(cache, f.optString("url"), f.optString("sha256"), p::log);
     }
 
+    /** The decrypt dropped what it could not go on from; the run goes back to the group's fetch step (run()). */
+    static final class Refetch extends IOException {
+        Refetch(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A decrypt had begun (@plain or its .progress is there) and @aea has no readable AEA header any more: the
+     * encrypted bytes behind the finished clusters are freed as it goes, and up to 0.1.6 that took the header with the
+     * first cluster, so a stopped decrypt could never resume.
+     */
+    static boolean headerLost(File aea, File plain) {
+        if (!plain.isFile() && !new File(plain.getPath() + ".progress").isFile()) {
+            return false;
+        }
+        try {
+            Unpack.head(aea);
+            return false;
+        } catch (IOException e) {
+            return true;
+        }
+    }
+
+    /** The .aea with the fetch's markers, the plain file and the decrypt's .progress: the member is fetched again. */
+    static void dropAea(File aea, File plain) {
+        IpswFetch.Item it = new IpswFetch.Item("", aea, IpswFetch.Kind.FILE, 0);
+        for (File f : new File[] {aea, IpswFetch.okFile(it), IpswFetch.doneFile(it), plain, new File(plain.getPath() + ".progress")}) {
+            f.delete();
+        }
+    }
+
     /** @aea into @plain (freeing the encrypted bytes as it goes), then the .aea deleted. */
     private static void decrypt(Context c, JSONObject m, String g, String aeaRel, String plainRel, int from, int to,
             PhoneSetup.Progress p, BooleanSupplier cancelled) throws IOException {
@@ -508,6 +558,13 @@ final class PhoneSetup26 {
             throw new IOException(aeaRel + " is not there: tap Resume to download it again");
         }
         plain.getParentFile().mkdirs();
+        if (headerLost(aea, plain)) {
+            // a decrypt stopped by 0.1.6 or older freed the AEA header with the first cluster: nothing can go on from here
+            // (A#247, "... is no AEA file" at every Resume). The fetch step goes first: a stop between the two still fetches.
+            clearDone(c, g, "fetch");
+            dropAea(aea, plain);
+            throw new Refetch(aea.getName() + " lost its header to a decrypt that was stopped: it is downloaded again");
+        }
         Unpack.AeaHead h = Unpack.head(aea);
         byte[] key = Unpack.key(h, keys(c, m, p));
         String name = plain.getName();

@@ -52,12 +52,38 @@ final class Unpack {
     private Unpack() {}
 
     static {
-        System.loadLibrary("unpack");
+        try {
+            System.loadLibrary("unpack");
+        } catch (UnsatisfiedLinkError e) {
+            // Android: the library is in the APK, a missing one is an error here as ever. A plain JVM (the unit
+            // tests of the AEA code, UnpackAeaTest: no LZFSE, their own hole puncher) has none and goes without it.
+            if ("The Android Project".equals(System.getProperty("java.vendor"))) {
+                throw e;
+            }
+        }
     }
 
     static native long lzfse(ByteBuffer src, int off, int len, ByteBuffer dst, int dcap);
 
     static native int punchHole(String path, long off, long len);
+
+    /** Frees [off, off + len) of a file (its size stays): punchHole, or the tests' own. */
+    interface Hole {
+        void punch(String path, long off, long len);
+    }
+
+    /** The unit freed from the encrypted file: whole MiB, as the filesystem frees them. */
+    static final long HOLE_UNIT = 1L << 20;
+
+    /**
+     * The first byte a decrypt that finished the cluster at @inOff may free: the MiB boundary below it, but never
+     * below the end of the header (@dataAt) rounded up to a boundary. The header is what a stopped decrypt has to
+     * read to go on (head()): freeing it with the first cluster left every stop of a decrypt unresumable, "... is
+     * no AEA file" (A#247, until 0.1.6).
+     */
+    static long holeFrom(long inOff, long dataAt) {
+        return Math.max(inOff & ~(HOLE_UNIT - 1), (dataAt + HOLE_UNIT - 1) & ~(HOLE_UNIT - 1));
+    }
 
     // -- HKDF, HMAC, AES ----------------------------------------------------------------------------
 
@@ -355,6 +381,12 @@ final class Unpack {
      */
     static long decryptAea(File in, File out, byte[] symKey, boolean freeInput, LongConsumer progress, BooleanSupplier cancelled)
             throws IOException {
+        return decryptAea(in, out, symKey, freeInput ? Unpack::punchHole : null, progress, cancelled);
+    }
+
+    /** As above; @hole frees the encrypted bytes of every finished cluster (null: they stay). */
+    static long decryptAea(File in, File out, byte[] symKey, Hole hole, LongConsumer progress, BooleanSupplier cancelled)
+            throws IOException {
         AeaHead a = head(in);
         if (a.profile != 1) {
             throw new IOException(in.getName() + ": AEA profile " + a.profile + ", not 1 (symmetric encryption)");
@@ -441,8 +473,12 @@ final class Unpack {
                     throw c instanceof IOException ? (IOException) c : new IOException(c);
                 }
                 dst.force(false);
-                if (freeInput) {
-                    punchHole(in.getPath(), inOff & ~0xfffffL, (at & ~0xfffffL) - (inOff & ~0xfffffL));
+                if (hole != null) {
+                    // (from the header's end at the earliest, see holeFrom; nothing when the cluster ends before a boundary)
+                    long from = holeFrom(inOff, a.dataAt), to = at & ~(HOLE_UNIT - 1);
+                    if (to > from) {
+                        hole.punch(in.getPath(), from, to - from);
+                    }
                 }
                 plain += got;
                 inOff = at;
