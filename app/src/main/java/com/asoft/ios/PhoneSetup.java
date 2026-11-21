@@ -164,7 +164,7 @@ final class PhoneSetup {
                 m.put("format", 1);
                 m.put("ios", "16");
                 m.put("build", ios16.optString("build", "20H392"));
-                m.put("kernel", "out-0103");
+                m.put("kernel", "out-0104");
                 m.put("withMyData", false);
                 m.put("made", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date()));
                 m.put("diskBytes", disk.length());
