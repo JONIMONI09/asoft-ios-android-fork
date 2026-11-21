@@ -129,7 +129,7 @@ public class ImportModeTest {
     @Test
     public void theStopTextCarriesTheSentenceAfterTheGenericOne() {
         String plain = CrashText.graphicsStop(REFUSED + "\n", "");
-        assertTrue(plain, plain.endsWith("its disk and saves are kept."));
+        assertTrue(plain, plain.startsWith("the phone's GPU driver refused") && plain.endsWith("Its disk and saves are kept."));
         CrashText.ImportRefusal r = CrashText.importRefusal(true, false, REFUSED + "\n");
         String text = CrashText.graphicsStop(REFUSED + "\n", "", r.sentence);
         assertEquals(plain + " " + r.sentence, text);

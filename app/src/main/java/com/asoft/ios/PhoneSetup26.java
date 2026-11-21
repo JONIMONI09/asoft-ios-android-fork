@@ -555,7 +555,11 @@ final class PhoneSetup26 {
             return;         // done before
         }
         if (!aea.isFile()) {
-            throw new IOException(aeaRel + " is not there: tap Resume to download it again");
+            // gone before its decrypt finished (a storage cleaner, a cleared folder): the fetch step stays done, so a
+            // plain Resume skipped the download and came back here every time. Clear it and fetch the member again.
+            clearDone(c, g, "fetch");
+            dropAea(aea, plain);
+            throw new Refetch(aea.getName() + " is not there any more: it is downloaded again");
         }
         plain.getParentFile().mkdirs();
         if (headerLost(aea, plain)) {
@@ -1399,7 +1403,11 @@ final class PhoneSetup26 {
                 }
                 MigrationWatch.Verdict v = watch.verdict(now);
                 if (v == MigrationWatch.Verdict.CEILING) {
-                    throw new IOException("DataMigration is still not done after " + min + " min, although iOS keeps answering. Tap Resume to redo this boot.");
+                    // "keeps answering" only when it does: A#259's ceiling came after 64 min of a silent shell
+                    long quietMin = (now - answered) / 60_000;
+                    throw new IOException("DataMigration is still not done after " + min + " min, "
+                            + (quietMin >= 15 ? "and iOS's console has not answered for " + quietMin + " min"
+                                    : "although iOS keeps answering") + ". Tap Resume to redo this boot.");
                 }
                 if (v != MigrationWatch.Verdict.WAIT) {
                     throw stalled(c, serial, watch, v, now, min, framesShown(c),

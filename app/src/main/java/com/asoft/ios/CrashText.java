@@ -245,6 +245,15 @@ final class CrashText {
     /** No exit reason at all: Android 10 keeps none for apps. */
     static final int EXIT_NOT_KEPT = -2;
 
+    /**
+     * Whether an end of the app during a helper job counts as a memory kill (the next try takes a smaller helper VM):
+     * LOW_MEMORY, and a plain SIGKILL (SIGNALED, status 9), which some phones' memory killers report instead
+     * (A#282: a 6 GB phone, 2 GB helper, "SIGNALED (2), status 9" in the iOS 16 disk build).
+     */
+    static boolean memoryKill(int reason, int status) {
+        return reason == EXIT_LOW_MEMORY || (reason == EXIT_SIGNALED && status == 9);
+    }
+
     private static final String[] EXIT_NAMES = {"UNKNOWN", "EXIT_SELF", "SIGNALED", "LOW_MEMORY", "CRASH", "CRASH_NATIVE", "ANR",
             "INITIALIZATION_FAILURE", "PERMISSION_CHANGE", "EXCESSIVE_RESOURCE_USAGE", "USER_REQUESTED", "USER_STOPPED",
             "DEPENDENCY_DIED", "OTHER", "FREEZER", "PACKAGE_STATE_CHANGE", "PACKAGE_UPDATED"};
@@ -631,6 +640,14 @@ final class CrashText {
             // 65,530 (APK-PLAN §6.19)
             return "its graphics memory used up the 65,530 memory mappings Android gives an app (a known limit"
                     + " of this version). Start it again; the 2x screen (iOS 26's menu on the home screen) needs fewer.";
+        }
+        if (hostMemoryRefused(tail)) {
+            // the driver would not take iOS's graphics memory as GPU memory (a host-memory import): the A#96 family
+            // on Malis, old KGSL kernels on Adrenos (A#148, A#281). Not "something this version cannot do": the
+            // phone's driver said no, and the line of the death names the check (reims 47e0c02f)
+            return "the phone's GPU driver refused to take the memory iOS draws with (a host-memory import), a wall"
+                    + " some GPUs and older kernels hit. Its disk and saves are kept."
+                    + (extra == null || extra.isEmpty() ? "" : " " + extra);
         }
         if (tail.contains("reims-vgpu: fatal")) {
             // metal2vulkan met something it does not translate yet (2026-11-07: a compute kernel's texture

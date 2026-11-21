@@ -650,7 +650,12 @@ public class SetupService extends Service {
     static String plain(IOException e) {
         String m = String.valueOf(e.getMessage());
         if (e instanceof java.net.UnknownHostException) {
-            return "No internet connection (Apple's server cannot be found). Tap Resume once the phone is online.";
+            // not always "offline": A#262/A#263 were online while updates.cdn-apple.com did not resolve for 5 min
+            // (a Private DNS, VPN or ad blocker that drops Apple's CDN names reads the same)
+            java.util.regex.Matcher h = java.util.regex.Pattern.compile("\"([^\"]+)\"").matcher(m);
+            String host = h.find() ? h.group(1) : "Apple's server";
+            return "The phone could not look up " + host + ": no internet connection, or a Private DNS, VPN or ad"
+                    + " blocker that does not answer for it. Tap Resume once it is reachable.";
         }
         if (e instanceof java.net.SocketTimeoutException || m.contains("timed out") || m.contains("connection ended")
                 || m.contains("closed the connection")) {
