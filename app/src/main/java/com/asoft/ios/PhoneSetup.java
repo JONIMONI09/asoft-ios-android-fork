@@ -41,6 +41,14 @@ final class PhoneSetup {
         void fetch(List<IpswFetch.Item> items, IpswFetch f);
 
         void log(String line);
+
+        /**
+         * The step waits (a decrypt between clusters) for the phone to cool down or for the charger: @note says why
+         * (HoldRule.Hold.note) for the screens and the notification; null when it goes on. The helper VM's holds do
+         * not come here (SetupService's Helper.hold sets the same state itself).
+         */
+        default void hold(String note) {
+        }
     }
 
     static final String[] STEPS = {"ipsw", "payload", "disk", "pack", "install", "firststart"};

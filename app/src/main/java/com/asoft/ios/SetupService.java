@@ -467,6 +467,17 @@ public class SetupService extends Service {
     /** What the last stopNow() that said stop gave as a wait reason (not a Cancel): reset before each run of the steps. */
     private volatile String stopWhy;
 
+    /**
+     * A step that waits for the phone's heat or battery by itself (a decrypt, PhoneSetup.Progress.hold) shows it as the
+     * held helper VM does (Helper.hold): @note into the state the screens read, null clears it. Returns what the
+     * notification says: the note, or the step's own text again.
+     */
+    static String holdText(State s, String note) {
+        s.holdNote = note;
+        s.held = note != null;
+        return note != null ? note : s.text + (s.pct >= 0 ? " (" + s.pct + "%)" : "");
+    }
+
     private PhoneSetup.Progress progress() {
         return new PhoneSetup.Progress() {
             long lastPost, lastBytes, lastMs;
@@ -527,6 +538,11 @@ public class SetupService extends Service {
                 }
                 step("a26".equals(state.target) ? state.step : "ipsw", total > 0 ? (int) (done * 100 / total) : -1,
                         String.format(Locale.ROOT, "Downloading from Apple: %.1f of %.1f GB", done / 1e9, total / 1e9));
+            }
+
+            @Override
+            public void hold(String note) {
+                post(holdText(state, note), state.pct);
             }
 
             int logged;

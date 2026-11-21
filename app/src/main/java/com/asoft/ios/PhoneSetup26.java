@@ -516,7 +516,7 @@ final class PhoneSetup26 {
             long total = Math.max(1, aea.length());
             p.step(g + ":decrypt", from + (int) Math.min(to - from, (to - from) * done / (total * 1.05)),
                     String.format(Locale.ROOT, "Decrypting %s: %.1f GB", name, done / 1e9));
-            holdWhileHot(c, cancelled);
+            holdWhileHot(c, p, cancelled);
         }, cancelled);
         AppLog.note(c, String.format(Locale.ROOT, "setup26: %s decrypted, %.2f GB in %d s", name, size / 1e9,
                 (System.currentTimeMillis() - t0) / 1000));
@@ -1653,10 +1653,24 @@ final class PhoneSetup26 {
         return b != null && b.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0;
     }
 
-    /** Waits (a decrypt between clusters) while the phone is too hot or its battery too low. */
-    private static void holdWhileHot(Context c, BooleanSupplier cancelled) {
-        while (shouldHold(c) && !cancelled.getAsBoolean()) {
-            sleep(5000);
-        }
+    /**
+     * Waits (a decrypt between clusters) while the phone is too hot or its battery too low, and says why on the
+     * screens and in the notification, as a held helper VM does (A#258: it showed "Decrypting ...: 0.3 GB" for ever).
+     */
+    private static void holdWhileHot(Context c, PhoneSetup.Progress p, BooleanSupplier cancelled) {
+        HoldRule.waitOut(() -> gate.decide(thermal(c), lowBattery(c), android.os.SystemClock.elapsedRealtime()), cancelled,
+                PhoneSetup26::sleep, android.os.SystemClock::elapsedRealtime, new HoldRule.Listener() {
+                    @Override
+                    public void held(HoldRule.Hold h) {
+                        AppLog.note(c, "setup26: decrypt waits: " + h.log());
+                        p.hold(h.note());
+                    }
+
+                    @Override
+                    public void over(long heldMs) {
+                        p.hold(null);
+                        AppLog.note(c, "setup26: decrypt goes on after " + heldMs / 1000 + " s held");
+                    }
+                });
     }
 }

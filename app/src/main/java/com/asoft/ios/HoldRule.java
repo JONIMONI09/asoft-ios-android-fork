@@ -110,6 +110,45 @@ final class HoldRule {
         since = nowMs;
     }
 
+    /** What a wait on a hold tells (the decrypt's: the screens and the log, as the held helper VM does). */
+    interface Listener {
+        /** The wait began, or its reason changed (heat to battery): the hold to say. */
+        void held(Hold h);
+
+        /** The wait is over (the phone cooled, the charger came, or the setup was stopped), after @heldMs. */
+        void over(long heldMs);
+    }
+
+    static final long WAIT_STEP_MS = 5000;
+
+    /**
+     * Waits while @now says hold and @stop is false, @sleep(WAIT_STEP_MS) between looks (a decrypt between its
+     * clusters, which has no VM to stop). The listener hears why (Hold.note) as soon as the wait begins, so the
+     * screen does not stay on "Decrypting ...: 0.3 GB" for a phone that sits at severe heat (A#258), and hears that
+     * it is over. A phone that is not held costs nothing and tells nothing.
+     */
+    static void waitOut(java.util.function.Supplier<Hold> now, java.util.function.BooleanSupplier stop,
+            java.util.function.LongConsumer sleep, java.util.function.LongSupplier clock, Listener l) {
+        Hold h = now.get();
+        if (!h.holding) {
+            return;
+        }
+        long t0 = clock.getAsLong();
+        Why said = null;
+        try {
+            while (h.holding && !stop.getAsBoolean()) {
+                if (h.why != said) {
+                    said = h.why;
+                    l.held(h);
+                }
+                sleep.accept(WAIT_STEP_MS);
+                h = now.get();
+            }
+        } finally {
+            l.over(clock.getAsLong() - t0);
+        }
+    }
+
     /** Android's name for a thermal status. */
     static String thermalName(int t) {
         switch (t) {
