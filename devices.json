@@ -23,7 +23,7 @@
       "os": ["ios26"],
       "state": "works",
       "phone": "Xiaomi 25053PC47I",
-      "note": "one report: ran 25 min at the 2x screen, up to 53 fps; the setup took 4 h 18 min; iOS 16 and watchOS not reported yet"
+      "note": "one report: ran 25 min at the 2x screen, up to 53 fps in its busiest second (the reporter saw 3 to 5 fps most of the time); the setup took 4 h 18 min; iOS 16 and watchOS not reported yet"
     },
     {
       "soc": "Kirin",
@@ -256,6 +256,30 @@
       "state": "works",
       "phone": "Samsung SM-S942B",
       "note": "one report: iOS 16 ran 15 min, up to 31 fps; the setup took 1 h 40 min (disk build 28 min, first start 27 min); free memory went down to 788 MB"
+    },
+    {
+      "soc": "SM7550",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "HONOR DNY-NX9",
+      "note": "one report: iOS 16 ran 10 min, up to 13 fps; free memory went down to 1080 MB"
+    },
+    {
+      "soc": "Tensor G5",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Google Pixel 10 Pro",
+      "note": "one report: iOS 16 ran 15 min, up to 35 fps; the setup took 3 h 53 min (disk build 2 h 53 min, first start 47 min); free memory went down to 2804 MB"
+    },
+    {
+      "soc": "mt6771",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH1911",
+      "note": "one report: iOS 16 ran 55 min on Android 10, up to 27 fps; this CPU has no native mode, so iOS runs the slow way; free memory went down to 520 MB"
     },
     {
       "soc": "",
