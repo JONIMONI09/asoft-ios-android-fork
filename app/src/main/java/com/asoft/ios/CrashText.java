@@ -573,6 +573,56 @@ final class CrashText {
      * line (@why); null when the GPU layer did not end it.
      */
     static String graphicsStop(String tail, String why) {
+        return graphicsStop(tail, why, "");
+    }
+
+    /** The word the engine's host-memory refusal carries in its fatal line ("Unsupported { feature: HostMemory, ..."). */
+    static final String HOST_MEMORY = "HostMemory";
+
+    /** The test build's sentence after a first host-memory refusal in the compatibility mode (ImportMode). */
+    static final String TRY_OTHER_MODE = "This test build tries another memory mode on the next start; tap Resume once more.";
+    /** ...and after one in the other memory mode as well. */
+    static final String BOTH_MODES = "This happened in both memory modes of this test build; please send the report.";
+
+    /** What a stop adds when the engine refused to import host memory: whether to write the marker, and the sentence. */
+    static final class ImportRefusal {
+        final boolean writeMarker;
+        /** "" when there is nothing to add */
+        final String sentence;
+
+        ImportRefusal(boolean writeMarker, String sentence) {
+            this.writeMarker = writeMarker;
+            this.sentence = sentence;
+        }
+    }
+
+    /**
+     * The test build's answer to the engine ending QEMU with a host-memory refusal: one "reims-vgpu: fatal" line of
+     * QEMU's stderr (@tail) that also names HostMemory, in a QEMU started in the compatibility mode (@compat26).
+     * @markerExists: whether the marker (ImportMode.MARKER) existed when that QEMU started, i.e. whether it already ran
+     * in the other memory mode; the screen asks every second, so the file as it is now (this stop's own write)
+     * must not be the input. Without the marker the stop writes it and says the next start tries another mode;
+     * with it the stop says both modes were tried. Anything else adds nothing.
+     */
+    static ImportRefusal importRefusal(boolean compat26, boolean markerExists, String tail) {
+        if (!compat26 || tail == null || !hostMemoryRefused(tail)) {
+            return new ImportRefusal(false, "");
+        }
+        return markerExists ? new ImportRefusal(false, BOTH_MODES) : new ImportRefusal(true, TRY_OTHER_MODE);
+    }
+
+    /** A "reims-vgpu: fatal" line that names HostMemory (one line, not a fatal line and a warning elsewhere). */
+    static boolean hostMemoryRefused(String text) {
+        for (String l : text.split("\n")) {
+            if (l.contains(FATAL) && l.contains(HOST_MEMORY)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** graphicsStop() with @extra (a sentence, or "") after the generic "cannot do yet" text. */
+    static String graphicsStop(String tail, String why, String extra) {
         // before the generic reims fatal below: running out of mappings is itself a "reims-vgpu: fatal" line
         // ("platform call mmap: the library's views of memory ran out of kernel mappings ... max_map_count").
         // Only those words: the engine names vm.max_map_count at every start (mappingsRanOut)
@@ -586,7 +636,7 @@ final class CrashText {
             // metal2vulkan met something it does not translate yet (2026-11-07: a compute kernel's texture
             // format on the watch) and reims ends QEMU rather than draw wrong
             return "its graphics asked the phone's GPU for something this version cannot do yet. Start it again:"
-                    + " its disk and saves are kept.";
+                    + " its disk and saves are kept." + (extra == null || extra.isEmpty() ? "" : " " + extra);
         }
         return null;
     }

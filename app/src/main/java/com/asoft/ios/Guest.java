@@ -1780,12 +1780,28 @@ final class Guest {
                     + " then start it again: its disk and saves are kept.", c.getFilesDir().getUsableSpace() / 1e9);
         }
         String why = lastWords(c);
-        String gpu = CrashText.graphicsStop(tail, why);
+        // the test build's retry after the engine refused a host-memory import: this is asked every second while the
+        // guest is stopped, so the decision rests on the marker as this QEMU started (importMarkerAtStart)
+        CrashText.ImportRefusal refusal = CrashText.importRefusal(compat26 && system26, importMarkerAtStart, tail);
+        String gpu = CrashText.graphicsStop(tail, why, refusal.sentence);
+        if (refusal.writeMarker) {
+            File marker = ImportMode.marker(runDir(c));
+            try {
+                if (marker.createNewFile()) {
+                    AppLog.note(c, "gpu: the engine refused a host-memory import: the next start runs with "
+                            + ImportMode.LAZY_MAPPINGS + "=" + ImportMode.LISTS + " (" + ImportMode.MARKER + " written)");
+                }
+            } catch (IOException e) {
+                AppLog.note(c, "gpu: " + ImportMode.MARKER + " could not be written: " + e.getMessage());
+            }
+        }
         return gpu != null ? gpu : why;
     }
 
     /** The last iOS 26 or watchOS QEMU started in the GPU's compatibility mode (start26, GpuCheck.noSparse). */
     static volatile boolean compat26;
+    /** ...and the test build's marker (ImportMode.MARKER) was there when it started: it ran with the lazy views off. */
+    static volatile boolean importMarkerAtStart;
     /** ...on the phone's own Vulkan driver (GpuCheck.systemDriver, experimental): its stops have their own words. */
     static volatile boolean system26;
     /** ...and it was one of the setup's own boots, whose failures the setup reports itself. */
@@ -2380,8 +2396,16 @@ final class Guest {
         compat26 = noSparse && "0".equals(env.get("REIMS_VGPU_DEFERRED_VIEWS"));
         compatSetupRun = sb != null;
         system26 = sys;
+        // The compatibility mode's engine switches (ImportMode: the host-import probe, and after a refusal the lazy
+        // views off). After the test file's env. lines, which keep what they set
+        // only the phone's own driver (sys): a Snapdragon's Turnip compatibility mode keeps the environment it had
+        importMarkerAtStart = compat26 && sys && ImportMode.marker(run).isFile();
+        env.putAll(ImportMode.envAdditions(compat26 && sys, importMarkerAtStart, ov));
         if (compat26) {
             AppLog.note(c, "gpu: compatibility mode (no sparse binds from host memory)");
+            if (sys) {
+                AppLog.note(c, ImportMode.describe(env, importMarkerAtStart));
+            }
         }
         if (sys) {
             AppLog.note(c, "gpu: the phone's own Vulkan driver (experimental), compatibility mode");
