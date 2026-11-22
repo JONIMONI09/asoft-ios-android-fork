@@ -123,6 +123,34 @@ public class HoldRuleTest {
     }
 
     @Test
+    public void aDecryptOnAPhoneThatStaysAtSevereGoesOnAfterTenMinutes() {
+        // A#261: a Sony whose sensor says severe while barely warm waited at every decrypt cluster for ever (the
+        // decrypt's rule had no limit); since 0.1.7 it is bounded like the helper VM's
+        HoldRule r = new HoldRule(true);
+        long[] clock = {0};
+        Told told = new Told();
+        HoldRule.waitOut(() -> r.decide(3, false, clock[0]), () -> clock[0] > 60 * MIN, ms -> clock[0] += ms,
+                () -> clock[0], told);
+        assertEquals(HoldRule.SEVERE_HOLD_MS, clock[0]);
+        assertEquals("over after " + HoldRule.SEVERE_HOLD_MS, told.events.get(told.events.size() - 1));
+        // the next clusters run through the 2 minute window, then the decrypt waits again
+        assertFalse(r.decide(3, false, clock[0] + MIN).holding);
+        assertTrue(r.decide(3, false, clock[0] + HoldRule.SEVERE_RUN_MS).holding);
+    }
+
+    @Test
+    public void theBootGateStartsABootOnAPhoneThatStaysAtSevere() {
+        // startCool asks every 15 s; a boot starts in the first run window and is not held after
+        HoldRule r = new HoldRule(true);
+        long t = 0;
+        while (r.decide(3, false, t).holding && t < 60 * MIN) {
+            t += 15_000;
+        }
+        assertEquals(HoldRule.SEVERE_HOLD_MS, t);
+        assertTrue(new HoldRule(true).decide(4, false, 0).holding);    // critical still holds
+    }
+
+    @Test
     public void aDecryptHoldTellsWhyAtOnceAndWhenItIsOver() {
         // A#258: a decrypt on a phone at severe heat showed "Decrypting ...: 0.3 GB" and nothing else
         HoldRule r = new HoldRule(false);

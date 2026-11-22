@@ -1691,8 +1691,16 @@ final class PhoneSetup26 {
 
     // -- thermal ----------------------------------------------------------------------------------------------
 
-    /** The boot gate's rule: hold at severe heat or worse (no time limit: a boot cannot be paused) until moderate or cooler (HoldRule). */
-    private static final HoldRule gate = new HoldRule(false);
+    /**
+     * The boot gate's rule (startCool): hold at severe heat until moderate or cooler, but at most
+     * HoldRule.SEVERE_HOLD_MS at a time, as the helper VM; critical and worse always hold (HoldRule). Unbounded
+     * before 0.1.7: a phone whose sensor sits at severe while it is barely warm (A#261, Sony SOG04 on the charger)
+     * never started the boot.
+     */
+    private static final HoldRule gate = new HoldRule(true);
+
+    /** The decrypt's (holdWhileHot): the same bounded rule, its own state (the decrypt runs SEVERE_RUN_MS between holds). */
+    private static final HoldRule decryptGate = new HoldRule(true);
 
     /** Android's thermal status (0 none … 3 severe … 6 shutdown). */
     static int thermal(Context c) {
@@ -1744,7 +1752,7 @@ final class PhoneSetup26 {
      * screens and in the notification, as a held helper VM does (A#258: it showed "Decrypting ...: 0.3 GB" for ever).
      */
     private static void holdWhileHot(Context c, PhoneSetup.Progress p, BooleanSupplier cancelled) {
-        HoldRule.waitOut(() -> gate.decide(thermal(c), lowBattery(c), android.os.SystemClock.elapsedRealtime()), cancelled,
+        HoldRule.waitOut(() -> decryptGate.decide(thermal(c), lowBattery(c), android.os.SystemClock.elapsedRealtime()), cancelled,
                 PhoneSetup26::sleep, android.os.SystemClock::elapsedRealtime, new HoldRule.Listener() {
                     @Override
                     public void held(HoldRule.Hold h) {

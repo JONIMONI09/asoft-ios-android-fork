@@ -12,8 +12,9 @@ package com.asoft.ios;
  * began at severe lasted until the status was light or cooler: a phone that settles at moderate (several
  * Motorola and Samsung ones do, with the charger in) never released it (A#63).
  *   - severe: hold, and release again at moderate or cooler;
- *   - helper VM only (@bounded): a hold at severe lasts at most SEVERE_HOLD_MS, then the VM runs for
- *     SEVERE_RUN_MS before holding again, so a phone that stays at severe still moves;
+ *   - @bounded (the helper VM since 0.1.6; the iOS 26 decrypt and the gate before a setup boot since 0.1.7, A#261):
+ *     a hold at severe lasts at most SEVERE_HOLD_MS, then the VM (the decrypt) runs for SEVERE_RUN_MS before
+ *     holding again, so a phone that stays at severe still moves (a boot starts in that window and is not held);
  *   - critical and worse: always hold, no limit (the phone is about to cut the apps itself).
  * A release is not undone for MIN_RUN_MS (a status flickering around a threshold does not stop and start the VM
  * twice a second). Battery: below 15 % and not charging holds until the charger is in (unchanged).
@@ -59,7 +60,7 @@ final class HoldRule {
     private long since;             // when the current heat hold, or run window, began
     private long releasedAt = -MIN_RUN_MS;
 
-    /** @bounded true for the helper VM (severe holds at most SEVERE_HOLD_MS at a time), false for the boot gate. */
+    /** @bounded true: severe holds at most SEVERE_HOLD_MS at a time (every setup rule since 0.1.7); false: until moderate. */
     HoldRule(boolean bounded) {
         this.bounded = bounded;
     }
