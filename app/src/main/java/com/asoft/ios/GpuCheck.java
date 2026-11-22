@@ -119,6 +119,17 @@ final class GpuCheck {
                 || debug && new File(c.getFilesDir(), "gpucheck-force-system").exists();
     }
 
+    /**
+     * The pass a start of iOS 26 / watchOS and a begun setup go by: this build's, or the one recorded by the build
+     * before an app update, with the mode it found (see GpuPass).
+     */
+    static GpuPass forStart(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences("setup", Context.MODE_PRIVATE);
+        boolean debug = (c.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        return new GpuPass(key(c), turnipOff(c) ? "" : p.getString("gpucheck-pass", ""), p.getString("gpucheck-nosparse", ""),
+                p.getString("gpucheck-system", ""), debug && new File(c.getFilesDir(), "gpucheck-force-system").exists());
+    }
+
     /** The last check's outcome, for the screen. */
     static final class Result {
         boolean pass;

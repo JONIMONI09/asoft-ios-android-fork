@@ -242,7 +242,8 @@ final class PhoneSetup26 {
 
     static void run(Context c, int cpus, PhoneSetup.Progress p, BooleanSupplier cancelled, IpswFetch[] current) throws IOException {
         work(c).mkdirs();
-        if (!GpuCheck.passed(c)) {
+        // (a setup begun before an app update goes on with the build before's pass: Set up checks a new one)
+        if (!GpuCheck.forStart(c).any) {
             throw new IOException("This phone's GPU has not passed the GPU check: iOS 26 and watchOS need it.");
         }
         JSONObject m = PhoneSetup.manifest(c);

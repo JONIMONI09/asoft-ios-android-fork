@@ -2363,9 +2363,16 @@ final class Guest {
         }
         Map<String, String> env = new java.util.HashMap<>(System.getenv());
         Emu.baseEnv(c, links, env);
+        // The GPU check's pass and its mode: this build's, or after an app update the build before's (GpuPass: an
+        // update used to start a Mali on Turnip and an Adreno 750 without the compatibility mode, A#296)
+        GpuPass gpu = GpuCheck.forStart(c);
+        if (gpu.any && !gpu.thisBuild) {
+            AppLog.note(c, "gpu: the check passed with another build of the app (" + gpu.by + "), not yet with this one: "
+                    + "starting in that pass's mode, " + gpu.mode());
+        }
         // A pass on the phone's own Vulkan driver (GpuCheck.systemDriver, experimental): the engine's library path has
         // no app loader and no Turnip, so its dlopen("libvulkan.so") gets Android's loader, and no driver file is set
-        boolean sys = GpuCheck.systemDriver(c);
+        boolean sys = gpu.system;
         if (sys) {
             env.put("LD_LIBRARY_PATH", Emu.linkLibrariesSystem(c).getPath());
             env.remove("VK_DRIVER_FILES");
@@ -2402,7 +2409,7 @@ final class Guest {
         // A GPU check passed in the compatibility mode (GpuCheck.noSparse: Turnip's sparse binds from host memory
         // read back zeros, Adreno 750): reims' older views, which import the guest's RAM by pointer and bind
         // nothing sparse from it. The setup's own boots too: they draw through the same reims
-        boolean noSparse = GpuCheck.noSparse(c) || sys;     // the phone's own driver always runs in it
+        boolean noSparse = gpu.noSparse || sys;     // the phone's own driver always runs in it
         if (noSparse) {
             env.put("REIMS_VGPU_DEFERRED_VIEWS", "0");
         }
