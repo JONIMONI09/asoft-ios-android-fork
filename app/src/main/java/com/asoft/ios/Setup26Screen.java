@@ -128,7 +128,7 @@ final class Setup26Screen {
         cancel = Ui.link(a, "Cancel", RED, v -> new android.app.AlertDialog.Builder(a)
                 .setTitle("Cancel the install?")
                 .setMessage("What was downloaded and built for it is deleted (an installed iOS 26 or watchOS stays).")
-                .setPositiveButton("Cancel install", (d, w) -> SetupService.cancel(a))
+                .setPositiveButton("Cancel install", (d, w) -> SetupService.cancel(a, SetupCancel.A26))
                 .setNegativeButton("Keep going", null)
                 .show());
         run.actions.addView(cancel, new LinearLayout.LayoutParams(-2, -2));

@@ -133,8 +133,18 @@ public class SetupService extends Service {
         c.startService(new Intent(c, SetupService.class).setAction("pause"));
     }
 
+    /** Cancel of whatever the service ran last (State.target): for the running service, which knows its own target. */
     static void cancel(Context c) {
         c.startService(new Intent(c, SetupService.class).setAction("cancel"));
+    }
+
+    /**
+     * Cancel of @target's setup ("ios16" or "a26"). The service's state says which target ran last, and a fresh process
+     * says "ios16": a Cancel of a stopped run (nothing in the service) names its target, so that it deletes that
+     * setup's work and not another's (SetupCancel).
+     */
+    static void cancel(Context c, String target) {
+        c.startService(new Intent(c, SetupService.class).setAction("cancel").putExtra("what", target));
     }
 
     static boolean busy() {
@@ -214,12 +224,10 @@ public class SetupService extends Service {
                 cancel = true;
                 pause = false;
                 if (worker == null) {
+                    // (a Cancel that names its target, cancel(c, target), is for that setup, whatever the service ran last)
+                    String target = SetupCancel.target(intent == null ? null : intent.getStringExtra("what"), state.target);
                     new Thread(() -> {
-                        if ("a26".equals(state.target)) {
-                            cancelA26(this);
-                        } else {
-                            Installer.deleteTree(PhoneSetup.work(this));
-                        }
+                        cancelWork(this, target);
                         state.step = "";
                         state.items = new ArrayList<>();
                         stopForeground(STOP_FOREGROUND_REMOVE);
@@ -457,11 +465,7 @@ public class SetupService extends Service {
                     }
                 }
                 if (cancel) {
-                    if (a26) {
-                        cancelA26(this);
-                    } else {
-                        Installer.deleteTree(PhoneSetup.work(this));
-                    }
+                    cancelWork(this, a26 ? SetupCancel.A26 : SetupCancel.IOS16);
                     state.step = "";
                     state.items = new ArrayList<>();
                     state.text = "Cancelled";
@@ -609,6 +613,21 @@ public class SetupService extends Service {
                 }
             }
         };
+    }
+
+    /** What a Cancel deletes for @target's setup (SetupCancel.work: iOS 16's work folder, or iOS 26 / watchOS' through cancelA26). */
+    private static void cancelWork(Context c, String target) {
+        File ios16 = PhoneSetup.work(c);
+        File a26 = PhoneSetup26.work(c);
+        File w = SetupCancel.work(target, ios16, a26);
+        if (w == null) {
+            return;
+        }
+        if (w == a26) {
+            cancelA26(c);
+        } else {
+            Installer.deleteTree(w);
+        }
     }
 
     /**
