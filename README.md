@@ -268,4 +268,7 @@ The app's code: MIT (LICENSE). The APK also carries:
   debugging. The adb client itself (`Adb*.java`, `Spake2.java`) is the app's own, written after
   AOSP's adb (Apache 2.0); SPAKE2's two points are BoringSSL's.
 
+The projects this is built on and the people whose reports, tests and patches shaped it are in
+[CREDITS.md](CREDITS.md).
+
 Not affiliated with Apple. iOS is Apple's.
