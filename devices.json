@@ -295,7 +295,7 @@
       "os": ["ios16"],
       "state": "works",
       "phone": "OPPO CPH1911",
-      "note": "one report: iOS 16 ran 55 min on Android 10, up to 27 fps; this CPU has no native mode, so iOS runs the slow way; free memory went down to 520 MB"
+      "note": "one report: iOS 16 ran 55 min on Android 10, up to 27 fps in the busiest second and 1-2 fps on the home screen; this CPU has no native mode, so iOS runs the slow way; free memory went down to 520 MB"
     },
     {
       "soc": "MT8775",
@@ -304,6 +304,22 @@
       "state": "works",
       "phone": "Samsung SM-X230",
       "note": "one report: iOS 16 ran 2 h 25 min, up to 2 fps, very slow; the setup took 3 h 42 min (disk build 1 h 46 min, first start 1 h 41 min); thermal status critical; free memory went down to 744 MB"
+    },
+    {
+      "soc": "SM7750",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Motorola edge 70",
+      "note": "one report: iOS 16 ran 30 min on Android 17 at 2 GB, up to 41 fps; the setup took 2 h 22 min (disk build 1 h 9 min, first start 1 h 5 min); free memory went down to 427 MB"
+    },
+    {
+      "soc": "GS201",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "Google Pixel 7a",
+      "note": "one report: iOS 16 ran 30 min on Android 17 at 4 GB, up to 21 fps; the setup took 2 h 9 min (disk build 1 h 10 min, first start 45 min); free memory went down to 65 MB, so 2 GB is safer"
     },
     {
       "soc": "",
