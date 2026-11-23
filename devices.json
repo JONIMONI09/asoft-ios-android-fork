@@ -3,7 +3,7 @@
   "devices": [
     {
       "soc": "SM8750",
-      "gpu": "Adreno (TM) 830",
+      "gpu": "Turnip Adreno (TM) 830",
       "os": ["ios26", "ios16", "watch"],
       "state": "works",
       "phone": "Samsung SM-S938B",
@@ -11,7 +11,7 @@
     },
     {
       "soc": "SM8850",
-      "gpu": "Adreno (TM) 840",
+      "gpu": "Turnip Adreno (TM) 840",
       "os": ["ios26"],
       "state": "works",
       "phone": "Xiaomi 25102PCBEG",
@@ -19,7 +19,7 @@
     },
     {
       "soc": "SM8735",
-      "gpu": "Adreno (TM) 825",
+      "gpu": "Turnip Adreno (TM) 825",
       "os": ["ios26"],
       "state": "works",
       "phone": "Xiaomi 25053PC47I",
@@ -27,7 +27,7 @@
     },
     {
       "soc": "SM8635",
-      "gpu": "Adreno (TM) 735",
+      "gpu": "Turnip Adreno (TM) 735",
       "os": ["ios26"],
       "state": "works",
       "phone": "Xiaomi 24069PC21G",
@@ -35,7 +35,7 @@
     },
     {
       "soc": "SM6475",
-      "gpu": "Adreno (TM) 710",
+      "gpu": "Turnip Adreno (TM) 710",
       "os": ["ios26"],
       "state": "works",
       "phone": "Samsung SM-A366E",
@@ -307,7 +307,7 @@
     },
     {
       "soc": "SM7750",
-      "gpu": "Adreno (TM) 722",
+      "gpu": "Turnip Adreno (TM) 722",
       "os": ["ios26", "ios16"],
       "state": "works",
       "phone": "Motorola edge 70",
