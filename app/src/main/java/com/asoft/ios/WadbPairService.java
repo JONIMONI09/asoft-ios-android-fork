@@ -84,12 +84,8 @@ public class WadbPairService extends Service {
         return PendingIntent.getService(this, action.hashCode(), new Intent(this, WadbPairService.class).setAction(action), flags);
     }
 
-    private PendingIntent selfForeground(String action, int flags) {
-        return PendingIntent.getForegroundService(this, action.hashCode(), new Intent(this, WadbPairService.class).setAction(action), flags);
-    }
-
-    /** The notification: @text, with the native reply field when @ask. */
-    private Notification notification(String text, boolean ask, boolean ongoing, boolean alert) {
+    /** The notification: @text, with the reply field when @ask. */
+    private Notification notification(String text, boolean ask, boolean ongoing) {
         NotificationManager nm = getSystemService(NotificationManager.class);
         // high: it has to come up over Settings' pairing dialog, where the user is
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Pairing with Wireless debugging", NotificationManager.IMPORTANCE_HIGH));
@@ -99,16 +95,13 @@ public class WadbPairService extends Service {
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setOngoing(ongoing)
-                .setOnlyAlertOnce(!alert)
+                .setOnlyAlertOnce(!ask)
                 .setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            n.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
-        }
         if (ask) {
             RemoteInput in = new RemoteInput.Builder(KEY_CODE).setLabel("Pairing code").build();
-            // mutable: Android writes the typed code into it; null icon matches upstream & Shizuku native reply
+            // mutable: Android writes the typed code into it
             n.addAction(new Notification.Action.Builder(null, "Enter the code",
-                    selfForeground(ACTION_CODE, PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                    self(ACTION_CODE, PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
                     .addRemoteInput(in).build());
         }
         if (ongoing) {
@@ -118,20 +111,19 @@ public class WadbPairService extends Service {
         return n.build();
     }
 
-    private void show(String text, boolean alert) {
-        boolean ask = !pairing;
-        if (foregrounded && !alert && text.equals(lastShownText) && ask == lastShownAsk) {
+    private void show(String text, boolean ask) {
+        if (foregrounded && text.equals(lastShownText) && ask == lastShownAsk) {
             return;
         }
         state = text;
         lastShownText = text;
         lastShownAsk = ask;
         foregrounded = true;
-        startForeground(ID, notification(text, ask, true, alert), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        startForeground(ID, notification(text, ask, true), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
 
     private static final String SEARCHING = "Open Settings > Developer options > Wireless debugging and tap "
-            + "\"Pair device with pairing code\", then tap Enter the code below (or type CODE PORT if needed).";
+            + "\"Pair device with pairing code\". Stay on that screen: this notification then asks for its code.";
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -146,15 +138,11 @@ public class WadbPairService extends Service {
             if (typed == null && intent != null) {
                 typed = intent.getStringExtra(KEY_CODE);
             }
-            if (!foregrounded) {
-                show(SEARCHING, false);
+            if (state == null) {
+                show(SEARCHING, false);     // the service was gone (its notification is from another life): start over
                 look();
-            }
-            if (typed != null) {
+            } else if (typed != null) {
                 pair(typed.toString());
-            } else {
-                AppLog.note(this, "wireless adb: Enter the code fired without RemoteInput text");
-                show("Inline notification input was blocked by the system; open ASoftware iOS in Split-Screen and tap \"Enter code here\".", true);
             }
             return START_NOT_STICKY;
         }
@@ -170,7 +158,7 @@ public class WadbPairService extends Service {
         return START_NOT_STICKY;
     }
 
-    /** Watches for the pairing dialog's port; updates notification hint once per newly discovered port. */
+    /** Watches for the pairing dialog's port; the notification asks for the code while there is one. */
     private void look() {
         if (mdns != null) {
             return;
@@ -183,7 +171,11 @@ public class WadbPairService extends Service {
                 port = p;
                 discoveredPort = p;
                 AppLog.note(this, "wireless adb: pairing dialog detected on port " + p);
-                show("The pairing dialog is open (port " + p + "): tap Enter the code and type its six digits.", true);
+                show("The pairing dialog is open: type its six digits here (Enter the code).", true);
+            } else if (p <= 0 && port > 0) {
+                port = -1;
+                discoveredPort = -1;
+                show(SEARCHING, false);
             }
         }));
         mdns.start();
@@ -286,7 +278,7 @@ public class WadbPairService extends Service {
                 } else if (!done) {
                     port = -1;      // that dialog is gone; its successor is announced anew
                     discoveredPort = -1;
-                    show(text, true);
+                    show(text, false);
                 }
             });
         }, "wadb-pair").start();
@@ -306,7 +298,7 @@ public class WadbPairService extends Service {
         }
         stopForeground(STOP_FOREGROUND_REMOVE);
         if (last != null) {
-            getSystemService(NotificationManager.class).notify(ID + 1, notification(last, false, false, true));
+            getSystemService(NotificationManager.class).notify(ID + 1, notification(last, false, false));
         }
         stopSelf();
     }
