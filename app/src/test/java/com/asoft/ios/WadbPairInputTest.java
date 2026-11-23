@@ -66,4 +66,13 @@ public class WadbPairInputTest {
         String words = CrashText.exitWords(CrashText.EXIT_CRASH_NATIVE, 11, "signal 11 in com.zte.gameassist");
         assertTrue(words.contains("Game Space"));
     }
+
+    @Test
+    public void portNotificationDeduplicatesDuplicatesAndTransientDrops() {
+        assertTrue(WadbPairService.shouldNotifyPortChange(37215, -1));
+        assertFalse(WadbPairService.shouldNotifyPortChange(37215, 37215));
+        assertFalse(WadbPairService.shouldNotifyPortChange(-1, 37215));
+        assertFalse(WadbPairService.shouldNotifyPortChange(0, 37215));
+        assertTrue(WadbPairService.shouldNotifyPortChange(41999, 37215));
+    }
 }

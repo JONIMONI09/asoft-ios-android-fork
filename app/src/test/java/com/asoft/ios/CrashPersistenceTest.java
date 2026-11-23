@@ -52,4 +52,37 @@ public class CrashPersistenceTest {
         assertTrue(joined.contains("setup-worker"));
         assertTrue(joined.contains("PhoneSetup26.run"));
     }
+
+    @Test
+    public void isolatesZteGameActivityStubBackgroundExceptionOnly() {
+        Thread main = new Thread("main");
+        Thread gameStub = new Thread("GameActivityStub");
+        Thread worker = new Thread("setup-worker");
+
+        NullPointerException zteNpe = new NullPointerException("KeyMapObserver.stop on null");
+        zteNpe.setStackTrace(new StackTraceElement[] {
+                new StackTraceElement("com.zte.gameassist.app.GameActivityStub", "unregisterObserver", "GameActivityStub.java", 137),
+                new StackTraceElement("android.os.HandlerThread", "run", "HandlerThread.java", 85)
+        });
+        assertTrue(AppExit.shouldIsolateOemHookCrash(gameStub, zteNpe, main));
+        // Never swallow if it ran on the main thread
+        assertFalse(AppExit.shouldIsolateOemHookCrash(main, zteNpe, main));
+        // Never swallow JVM Errors even on GameActivityStub thread
+        assertFalse(AppExit.shouldIsolateOemHookCrash(gameStub, new OutOfMemoryError("oom"), main));
+
+        // Never swallow if any com.asoft.ios frame is present in the stack
+        NullPointerException mixed = new NullPointerException("npe");
+        mixed.setStackTrace(new StackTraceElement[] {
+                new StackTraceElement("com.zte.gameassist.app.GameActivityStub", "unregisterObserver", "GameActivityStub.java", 137),
+                new StackTraceElement("com.asoft.ios.SetupActivity", "onDestroy", "SetupActivity.java", 99)
+        });
+        assertFalse(AppExit.shouldIsolateOemHookCrash(worker, mixed, main));
+
+        // Normal worker exceptions are never isolated
+        IllegalStateException appBug = new IllegalStateException("bug");
+        appBug.setStackTrace(new StackTraceElement[] {
+                new StackTraceElement("com.asoft.ios.PhoneSetup26", "run", "PhoneSetup26.java", 100)
+        });
+        assertFalse(AppExit.shouldIsolateOemHookCrash(worker, appBug, main));
+    }
 }

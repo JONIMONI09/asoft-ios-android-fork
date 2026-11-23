@@ -113,9 +113,5 @@
             android:authorities="${applicationId}.share"
             android:exported="false"
             android:grantUriPermissions="true" />
-
-        <receiver
-            android:name=".WadbPairService$ReplyReceiver"
-            android:exported="false" />
     </application>
 </manifest>

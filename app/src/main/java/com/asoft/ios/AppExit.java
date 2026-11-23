@@ -191,12 +191,58 @@ final class AppExit {
     // -- the start
 
     /**
+     * Whether an uncaught exception belongs solely to an injected OEM Game Space / Game Assistant
+     * background thread (such as ZTE {@code GameActivityStub} throwing in {@code KeyMapObserver.stop})
+     * with no app code on its stack. Isolating these non-fatal background threads prevents OEM hooks
+     * from killing long-running setups or emulated guests.
+     */
+    static boolean shouldIsolateOemHookCrash(Thread t, Throwable e, Thread mainThread) {
+        if (t == null || e == null || !(e instanceof Exception)) {
+            return false;
+        }
+        String tName = t.getName();
+        if ((mainThread != null && t == mainThread) || "main".equals(tName)) {
+            return false;
+        }
+        boolean sawOemGameHook = tName != null
+                && (tName.startsWith("GameActivityStub") || tName.startsWith("GameAssist"));
+        Throwable cur = e;
+        int depth = 0;
+        while (cur != null && depth++ < 8) {
+            for (StackTraceElement el : cur.getStackTrace()) {
+                String cls = el.getClassName();
+                if (cls.startsWith("com.asoft.ios.")) {
+                    return false;
+                }
+                if (CrashText.gameAssistantKill(cls)) {
+                    sawOemGameHook = true;
+                }
+            }
+            cur = cur.getCause();
+        }
+        return sawOemGameHook;
+    }
+
+    /**
      * The main process starts (AsoftApp): the handler goes in, the marker a process before left is read (and
      * removed, before anything of this process writes its own), and its end is looked into off the main thread.
      */
     static void onStart(Application a) {
         Thread.UncaughtExceptionHandler before = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try {
+                Thread mainThread = null;
+                try {
+                    mainThread = android.os.Looper.getMainLooper().getThread();
+                } catch (Throwable ignored) {
+                }
+                if (shouldIsolateOemHookCrash(t, e, mainThread)) {
+                    AppLog.note(a, "survived OEM Game Space hook crash on background thread "
+                            + (t == null ? "?" : t.getName()) + ": " + e);
+                    return;
+                }
+            } catch (Throwable ignored) {
+            }
             try {
                 crashed(a, t, e);
             } catch (Throwable ignored) {

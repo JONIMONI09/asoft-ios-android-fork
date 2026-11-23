@@ -6,11 +6,10 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.app.Service;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
-import android.graphics.drawable.Icon;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 
@@ -43,28 +42,11 @@ public class WadbPairService extends Service {
         }
     }
 
-    /** Relays notification inline-reply broadcasts to the foreground service reliably across Android 11-16 OEMs. */
-    public static final class ReplyReceiver extends BroadcastReceiver {
-        @Override
-        public void onReceive(Context c, Intent intent) {
-            Bundle b = RemoteInput.getResultsFromIntent(intent);
-            CharSequence typed = b == null ? null : b.getCharSequence(KEY_CODE);
-            if (typed == null && intent != null) {
-                typed = intent.getStringExtra(KEY_CODE);
-            }
-            if (typed == null) {
-                return;
-            }
-            Intent svc = new Intent(c, WadbPairService.class)
-                    .setAction(ACTION_CODE)
-                    .putExtra(KEY_CODE, typed.toString());
-            c.startForegroundService(svc);
-        }
-    }
-
     private AdbMdns mdns;
     private volatile int port = -1;
     private volatile boolean pairing, done, foregrounded;
+    private String lastShownText;
+    private boolean lastShownAsk;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable giveUp = () -> finish("Pairing stopped: no code came in ten minutes. Start it again from the app.");
 
@@ -89,6 +71,10 @@ public class WadbPairService extends Service {
         return discoveredPort;
     }
 
+    static boolean shouldNotifyPortChange(int incomingPort, int currentPort) {
+        return incomingPort > 0 && incomingPort != currentPort;
+    }
+
     @Override
     public IBinder onBind(Intent i) {
         return null;
@@ -98,22 +84,15 @@ public class WadbPairService extends Service {
         return PendingIntent.getService(this, action.hashCode(), new Intent(this, WadbPairService.class).setAction(action), flags);
     }
 
-    private PendingIntent replyIntent() {
-        Intent i = new Intent(this, ReplyReceiver.class).setAction(ACTION_CODE);
-        return PendingIntent.getBroadcast(this, 101, i, PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    private PendingIntent selfForeground(String action, int flags) {
+        return PendingIntent.getForegroundService(this, action.hashCode(), new Intent(this, WadbPairService.class).setAction(action), flags);
     }
 
-    private void ensureChannel(NotificationManager nm) {
-        if (nm.getNotificationChannel(CHANNEL) == null) {
-            // high: it has to come up over Settings' pairing dialog, where the user is
-            nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Pairing with Wireless debugging", NotificationManager.IMPORTANCE_HIGH));
-        }
-    }
-
-    /** The notification: @text, keeping the reply field visible whenever ongoing and not actively pairing. */
-    private Notification notification(String text, boolean ongoing, boolean alert) {
+    /** The notification: @text, with the native reply field when @ask. */
+    private Notification notification(String text, boolean ask, boolean ongoing, boolean alert) {
         NotificationManager nm = getSystemService(NotificationManager.class);
-        ensureChannel(nm);
+        // high: it has to come up over Settings' pairing dialog, where the user is
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Pairing with Wireless debugging", NotificationManager.IMPORTANCE_HIGH));
         Notification.Builder n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setContentTitle("ASoftware iOS: pairing")
@@ -122,38 +101,37 @@ public class WadbPairService extends Service {
                 .setOngoing(ongoing)
                 .setOnlyAlertOnce(!alert)
                 .setContentIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
-        if (ongoing && !pairing) {
-            RemoteInput in = new RemoteInput.Builder(KEY_CODE)
-                    .setLabel("6-digit code (or CODE PORT)")
-                    .setAllowFreeFormInput(true)
-                    .build();
-            n.addAction(new Notification.Action.Builder(
-                    Icon.createWithResource(this, android.R.drawable.ic_menu_edit),
-                    "Enter the code",
-                    replyIntent()).addRemoteInput(in).build());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            n.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
+        }
+        if (ask) {
+            RemoteInput in = new RemoteInput.Builder(KEY_CODE).setLabel("Pairing code").build();
+            // mutable: Android writes the typed code into it; null icon matches upstream & Shizuku native reply
+            n.addAction(new Notification.Action.Builder(null, "Enter the code",
+                    selfForeground(ACTION_CODE, PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                    .addRemoteInput(in).build());
         }
         if (ongoing) {
-            n.addAction(new Notification.Action.Builder(
-                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "Cancel",
+            n.addAction(new Notification.Action.Builder(null, "Cancel",
                     self(ACTION_CANCEL, PendingIntent.FLAG_IMMUTABLE)).build());
         }
         return n.build();
     }
 
     private void show(String text, boolean alert) {
-        state = text;
-        Notification n = notification(text, true, alert);
-        if (!foregrounded) {
-            foregrounded = true;
-            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        } else {
-            getSystemService(NotificationManager.class).notify(ID, n);
+        boolean ask = !pairing;
+        if (foregrounded && !alert && text.equals(lastShownText) && ask == lastShownAsk) {
+            return;
         }
+        state = text;
+        lastShownText = text;
+        lastShownAsk = ask;
+        foregrounded = true;
+        startForeground(ID, notification(text, ask, true, alert), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
 
     private static final String SEARCHING = "Open Settings > Developer options > Wireless debugging and tap "
-            + "\"Pair device with pairing code\", then tap Enter the code below (if no port appears automatically, type CODE PORT).";
+            + "\"Pair device with pairing code\", then tap Enter the code below (or type CODE PORT if needed).";
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -174,11 +152,17 @@ public class WadbPairService extends Service {
             }
             if (typed != null) {
                 pair(typed.toString());
+            } else {
+                AppLog.note(this, "wireless adb: Enter the code fired without RemoteInput text");
+                show("Inline notification input was blocked by the system; open ASoftware iOS in Split-Screen and tap \"Enter code here\".", true);
             }
             return START_NOT_STICKY;
         }
         done = false;
-        foregrounded = false;
+        pairing = false;
+        port = -1;
+        discoveredPort = -1;
+        lastShownText = null;
         show(SEARCHING, false);
         look();
         main.removeCallbacks(giveUp);
@@ -186,7 +170,7 @@ public class WadbPairService extends Service {
         return START_NOT_STICKY;
     }
 
-    /** Watches for the pairing dialog's port; updates notification hint when discovered. */
+    /** Watches for the pairing dialog's port; updates notification hint once per newly discovered port. */
     private void look() {
         if (mdns != null) {
             return;
@@ -195,15 +179,11 @@ public class WadbPairService extends Service {
             if (done || pairing) {
                 return;
             }
-            if (p > 0) {
+            if (shouldNotifyPortChange(p, port)) {
                 port = p;
                 discoveredPort = p;
-                show("Pairing dialog found (port " + p + "): tap Enter the code below and type its six digits.", true);
-            } else {
-                // Keep previously discovered port only if user didn't fail; still allow Enter the code anytime.
-                port = -1;
-                discoveredPort = -1;
-                show(SEARCHING, false);
+                AppLog.note(this, "wireless adb: pairing dialog detected on port " + p);
+                show("The pairing dialog is open (port " + p + "): tap Enter the code and type its six digits.", true);
             }
         }));
         mdns.start();
@@ -318,6 +298,7 @@ public class WadbPairService extends Service {
         state = null;
         discoveredPort = -1;
         foregrounded = false;
+        lastShownText = null;
         main.removeCallbacks(giveUp);
         if (mdns != null) {
             mdns.stop();
@@ -325,7 +306,7 @@ public class WadbPairService extends Service {
         }
         stopForeground(STOP_FOREGROUND_REMOVE);
         if (last != null) {
-            getSystemService(NotificationManager.class).notify(ID + 1, notification(last, false, true));
+            getSystemService(NotificationManager.class).notify(ID + 1, notification(last, false, false, true));
         }
         stopSelf();
     }
@@ -335,6 +316,7 @@ public class WadbPairService extends Service {
         state = null;
         discoveredPort = -1;
         foregrounded = false;
+        lastShownText = null;
         main.removeCallbacks(giveUp);
         if (mdns != null) {
             mdns.stop();
