@@ -1,4 +1,4 @@
-name: Build Issue #92 Test APK
+name: Build UX & Stability Test APK
 
 on:
   push:
@@ -13,10 +13,10 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main (frozen Issue #92 code)
+      - name: Checkout feat/ux-stability-pack (496b2c0)
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: feat/ux-stability-pack
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -79,22 +79,22 @@ jobs:
           }
           EOF
           bash ./gradlew -I /tmp/mirror.init.gradle testDebugUnitTest assembleDebug -Dorg.gradle.java.home="$JAVA_HOME" --no-daemon --console=plain --max-workers=2
-          cp app/build/outputs/apk/debug/app-debug.apk ASoftware-iOS-Android-0.1.7-issue92-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk
 
       - name: Upload workflow APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ASoftware-iOS-Android-0.1.7-issue92-debug
-          path: ASoftware-iOS-Android-0.1.7-issue92-debug.apk
+          name: ASoftware-iOS-Android-0.1.7-ux-stability-debug
+          path: ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk
 
       - name: Publish pre-release APK on GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v0.1.7-issue92-test --yes --cleanup-tag || true
-          gh release create v0.1.7-issue92-test \
-            --target "a33a8c5591cba0c7fd9d76d80cfdc342aaea9c09" \
+          gh release delete v0.1.7-ux-stability-test --yes --cleanup-tag || true
+          gh release create v0.1.7-ux-stability-test \
+            --target "496b2c0da55ba7d75a6ca9c0a71b58937b784cec" \
             --prerelease \
-            --title "0.1.7 Issue #92 Test APK (SM8650 KGSL Shim + O_SYNC Logs)" \
-            --notes "Signed debug APK built from main (a33a8c5) with NDK 29 + CMake 3.22.1. Ready for sideload install on REDMAGIC Nova (SM8650). Uninstall upstream 0.1.7 release first if signatures differ." \
-            ASoftware-iOS-Android-0.1.7-issue92-debug.apk
+            --title "0.1.7 UX & Stability Test APK (Pause, Split-Screen, Game Space, Watchdog, Pairing Fix)" \
+            --notes "Signed debug APK built from branch feat/ux-stability-pack (496b2c0) on top of main (Issue #92 KGSL fix). Includes Pause fix, Split-Screen/Multi-Window support, REDMAGIC Game Space guard, FreezeWatchdog + fsync logs, Wireless debugging pairing notification & in-app dialog fix, and #365 Game Assistant attribution." \
+            ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk
