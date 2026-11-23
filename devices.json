@@ -322,6 +322,14 @@
       "note": "one report: iOS 16 ran 30 min on Android 17 at 4 GB, up to 21 fps; the setup took 2 h 9 min (disk build 1 h 10 min, first start 45 min); free memory went down to 65 MB, so 2 GB is safer"
     },
     {
+      "soc": "SM6450",
+      "gpu": "",
+      "os": ["ios16"],
+      "state": "works",
+      "phone": "OPPO CPH2699",
+      "note": "one report: iOS 16 ran 10 min on Android 16 at 4 GB, up to 8 fps, slow; the setup took 7 h 49 min (disk build 3 h 57 min, first start 3 h 32 min); free memory went down to 1543 MB"
+    },
+    {
       "soc": "",
       "gpu": "Mali",
       "os": ["ios26", "watch"],
