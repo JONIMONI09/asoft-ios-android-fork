@@ -54,3 +54,42 @@
    - Output: `app/build/outputs/apk/debug/app-debug.apk` (`109 MB`, `apksigner verify`: v2 scheme verified), containing freshly compiled `libkgslshim.so` (`224 KB`), `librender.so`, `libgpucheck.so`, `libunpack.so` alongside prebuilt 0.1.7 `libqemu26.so`, `libqemu.so`, Turnip (`lib_libvulkan_freedreno.so.so`), Vulkan loader, and 118 assets.
 6. **Hardware Verification Status:**
    - Not yet run on physical Snapdragon `SM8650` / Adreno 750 hardware (REDMAGIC Nova `NP03J`) in the Linux build VM; requires on-device validation and maintainer code review.
+
+---
+
+# Part 2 — UX, Stability, Split-Screen, Game Space & Wireless Debugging Fixes (`feat/ux-stability-pack`)
+
+## Timeline & Branch Isolation
+- **Branch:** `feat/ux-stability-pack` (branched off `main` `a33a8c5`, so Upstream PR `#371` and `main` remain completely clean and unaffected; contains zero CI workflows and zero APK binaries).
+- **Implementation Commit:** `496b2c0` (`2026-11-23 20:09:41 UTC`) followed by documentation update in `CHANGES.md`.
+
+---
+
+## Bugs Fixed & Enhancements Added (27 files)
+
+1. **Wireless Debugging Pairing Code Unavailable / Missing in Notification Bar (`WadbPairService.java`, `AdbMdns.java`, `MainActivity.java`, `AndroidManifest.xml`):**
+   - **Root Cause:** `WadbPairService` omitted the `"Enter the code"` `RemoteInput` action whenever mDNS discovery hadn't finished yet (`SEARCHING`), disappeared (`onServiceLost` when opening the shade), or after a failed attempt (`show(..., false)`). Additionally, `AdbMdns.own()` compared `InetAddress.equals()` strictly, which rejects link-local IPv6 addresses on Android 14–16 when `scope_id` differs or `getHost()` is null (`getHostAddresses()`).
+   - **Fix:** Always keep `"Enter the code"` (`RemoteInput`, free-form enabled, explicit `Icon`) available while ongoing; route inline replies via `PendingIntent.getBroadcast` -> `WadbPairService$ReplyReceiver`; parse `"123456"`, `"123 456"`, `"123456 37215"`, and `"123456:37215"` cleanly via `parsePairInput()`; compare raw IP bytes and `API >= 34` `getHostAddresses()` in `AdbMdns.ownAddress()`; and add an in-app **`Enter code here`** fallback dialog (`showPairCodeDialog()`) in `MainActivity.wirelessDebugging()` for Split-Screen use.
+2. **Broken Setup Pause Button & Missing Helper-VM / Step-Boundary Pause (`PauseUi.java`, `SetupService.java`, `Setup26Screen.java`, `SetupScreen.java`, `PhoneSetup.java`, `PhoneSetup26.java`, `MainActivity.java`):**
+   - **Root Cause:** Tapping `Pause` left the button clickable and unchanged during async stop; `Helper.hold` updated `state.held` (`SIGSTOP`) without setting `state.paused`; and non-interruptible steps (`:firstboot`, `:wallpaper`, `:pack`, `:unpack`, non-download iOS 16 steps) hid the Pause button completely instead of supporting deferred pause.
+   - **Fix:** Synchronously set `state.pausing` / `state.pauseAfterStep` in `SetupService.pause(c)` so buttons immediately show greyed `"Pausing…"` or `"Pausing after step…"` (`enabled=false`, `alpha=0.4f`), synchronize `state.paused` inside `Helper.hold`, and check `Progress.stepPauseRequested()` between setup steps before starting the next step.
+3. **Split-Screen & Multi-Window Support + Zero-Dimension Crashes (`AndroidManifest.xml`, `ScreenActivity.java`, `ScreenGeometry.java`, `WatchCase.java`, `render.c`):**
+   - **Root Cause:** Portrait orientation locks in `AndroidManifest.xml` & `ScreenActivity.onCreate()`, incomplete `configChanges`, stopping `Choreographer` in `onPause()` instead of `onStop()`, immersive bars fighting split-screen, and unguarded zero/negative dimensions in `render.c`, `ScreenActivity.guestPoint()`/`keepThumb()`, and `WatchCase.onMeasure()`.
+   - **Fix:** Set `android:resizeableActivity="true"`, remove portrait locks, handle `onMultiWindowModeChanged` / `onConfigurationChanged`, keep frame rendering live between `onStart()` and `onStop()`, and guard all layout/touch/GL math via `ScreenGeometry` & `render.c` bounds checks.
+4. **REDMAGIC / OEM Game Space Mitigation & Upstream Issue #365 Attribution (`AndroidManifest.xml`, `GameEnvGuard.java`, `MainActivity.java`, `ScreenActivity.java`, `CrashText.java`, `AppExit.java`):**
+   - Set `android:appCategory="productivity"`.
+   - Added `GameEnvGuard`: `Window.setPreferMinimalPostProcessing(true)` (API 30+), `Surface.setFrameRate(60f, ...)` (API 30+), `GameManager` mode logging (API 31+), focus/`ACTION_CANCEL` burst/resize logging, and a dismissible Home warning banner when OEM Game Space (`com.zte.gameservice`, `com.nubia.gamelauncher`, etc.) is detected.
+   - Added `CrashText.gameAssistantKill()` and `AppExit` stack scanning so crashes injected by OEM Game Assistants (`com.zte.gameassist`, etc., Issue `#365`) clearly identify Game Space as the external culprit.
+5. **Freeze Watchdog, `fsync`ed Crash Persistence & UI Cleanups (`FreezeWatchdog.java`, `AsoftApp.java`, `AppExit.java`, `CrashReport.java`, `LogsActivity.java`, `SetupActivity.java`):**
+   - Added `FreezeWatchdog` (main-thread stall detection `>= 4 s` writing bounded thread/stack snapshots via `FileOutputStream.getFD().sync()` to `files/run/last-ui-freeze.txt`), `onTrimMemory`/`onLowMemory` logging, subprocess (`:gpucheck`) uncaught exception logging, `fsync` on `AppExit.save()` and `CrashReport.write()`, automatic attachment of `kgsl-trace.txt` & `last-ui-freeze.txt` to crash/exit reports, horizontal scroll on `LogsActivity` actions, and destroyed-Activity guard in `SetupActivity.finishRun()`.
+
+---
+
+## Verification Report (`feat/ux-stability-pack`)
+
+- **NDK C Checks (`aarch64-linux-android29-clang`):** `render.c` (`-Wall -Werror`) & `kgsl_shim.c` (`-Wall -Wextra -Werror`) — **0 errors, 0 warnings**.
+- **C Host Unit Test (`gcc -DASOFT_SHIM_HOST_TEST -Wall -Wextra -Werror`):** `kgsl_shim_test` — **all assertions passed**.
+- **Android JVM Unit Tests (`./gradlew testDebugUnitTest`):** **50 suites, 416 tests (415 passed, 0 failed, 0 errors, 1 skipped** via JUnit assumption in `CounterFreqTest.aRealTreeLikeTheScript` on non-ARM64 devbox) — includes new `PauseStateTest`, `GeometrySafetyTest`, `GameEnvGuardTest`, `CrashPersistenceTest`, and `WadbPairInputTest`.
+- **Android Lint (`./gradlew lintReportDebug`):** **0 new errors / `NewApi` warnings** in any modified or added file (only pre-existing upstream BOM error at `MiniJson.java:93`).
+- **Signed APK Verification:** `ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk` (`114,170,310` bytes, v2 signature verified by `apksigner`).
+
