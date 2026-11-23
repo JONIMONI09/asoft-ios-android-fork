@@ -69,7 +69,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout box;
     private final Panel p26 = new Panel(Guest.IOS26), p16 = new Panel(Guest.IOS16), pWatch = new Panel(Guest.WATCH);
-    private TextView hint, powerWarn, freeRamValue, setupScreenValue, wadbValue, updateValue, logsValue, footer, engineLog;
+    private TextView hint, powerWarn, freeRamValue, setupScreenValue, wadbValue, compat26Value, updateValue, logsValue, footer, engineLog;
     private LinearLayout updateBar, advanced;
     private TextView updateText, updateNote, updateGet, updateDismiss;
     /**
@@ -424,6 +424,7 @@ public class MainActivity extends Activity {
         setupScreenValue = row(settings, "Keep screen on during setup", v -> toggleSetupScreen());
         wadbValue = row(settings, "Wireless debugging", v -> wirelessDebugging());
         ((View) wadbValue.getParent()).setVisibility(WirelessAdb.supported() ? View.VISIBLE : View.GONE);
+        compat26Value = row(settings, "iOS 26 GPU compatibility", v -> showCompat26Dialog());
         updateValue = row(settings, "Check for updates", v -> {
             UpdateCheck.setEnabled(this, !UpdateCheck.enabled(this));
             showUpdate();
@@ -1435,12 +1436,69 @@ public class MainActivity extends Activity {
         boolean can = MemoryCleaner.supported(this);
         freeRamValue.setText(can ? MemoryCleaner.enabled(this) ? "On" : "Off" : "Pair first");
         setupScreenValue.setText(SetupService.keepScreen(this) ? "On" : "Off");
+        compat26Value.setText(CompatConfig.summary(CompatConfig.load(this)));
         int records = CrashReport.files(this).size();
         logsValue.setText(records == 0 ? "" : records == 1 ? "1 record" : records + " records");
         String pairing = WadbPairService.state;
         wadbValue.setText(pairing != null ? "Pairing…" : !WirelessAdb.paired(this) ? "Not paired"
                 : WirelessAdb.refused(this) ? "Pair again" : WirelessAdb.connected() ? "Connected"
                 : WirelessAdb.switchedOn(this) == 0 ? "Paired, off now" : "Paired");
+    }
+
+    private void showCompat26Dialog() {
+        CompatConfig.Config cfg = CompatConfig.load(this).copy();
+        final String[] labels = {
+                "Vanilla 0.1.7 fallback (disable all mitigations)",
+                "Crash-safe O_SYNC logging (app / stderr / serial / KGSL trace)",
+                "Multi-VMA host-import bounce (3-way page-diff shadow memory)",
+                "KGSL cache sync before GPU submits",
+                "Compat feature guard (strip sparse & host_image_copy)",
+                "Submit throttle (serialize & bound queue submits)",
+                "Disable lazy IOSurface reparking (REIMS_VGPU_LAZY_MAPPINGS=lists)",
+                "Opt-in: Bounce ALL host-pointer imports (even 1-VMA)",
+                "Opt-in: Dedicated Turnip KGSL import thread (always)",
+                "Opt-in: Turnip safe debug flags (noubwc,flushall,sysmem)",
+                "Opt-in: Verbose engine memory logging (reims + metal2vulkan)"
+        };
+        final boolean[] checked = {
+                cfg.vanillaFallback,
+                cfg.syncLogging,
+                cfg.multiVmaBounce,
+                cfg.kgslCacheSync,
+                cfg.featureGuard,
+                cfg.submitThrottle,
+                cfg.lazySurfacesOff,
+                cfg.allHostBounce,
+                cfg.importThreadAlways,
+                cfg.tuDebugSafe,
+                cfg.verboseEngineLogs
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("iOS 26 GPU compatibility (#92)")
+                .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton("Save", (d, w) -> {
+                    cfg.vanillaFallback = checked[0];
+                    cfg.syncLogging = checked[1];
+                    cfg.multiVmaBounce = checked[2];
+                    cfg.kgslCacheSync = checked[3];
+                    cfg.featureGuard = checked[4];
+                    cfg.submitThrottle = checked[5];
+                    cfg.lazySurfacesOff = checked[6];
+                    cfg.allHostBounce = checked[7];
+                    cfg.importThreadAlways = checked[8];
+                    cfg.tuDebugSafe = checked[9];
+                    cfg.verboseEngineLogs = checked[10];
+                    CompatConfig.save(this, cfg);
+                    showSettings();
+                    Toast.makeText(this, "Applies on next iOS 26 start", Toast.LENGTH_SHORT).show();
+                })
+                .setNeutralButton("Safe defaults", (d, w) -> {
+                    CompatConfig.resetDefaults(this);
+                    showSettings();
+                    Toast.makeText(this, "Safe defaults restored", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void toggleFreeRam() {
