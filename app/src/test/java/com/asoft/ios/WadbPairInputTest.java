@@ -75,4 +75,29 @@ public class WadbPairInputTest {
         assertFalse(WadbPairService.shouldNotifyPortChange(0, 37215));
         assertTrue(WadbPairService.shouldNotifyPortChange(41999, 37215));
     }
+
+    @Test
+    public void remoteInputUsesUpstreamPendingIntentGetServiceAndAskGating() throws Exception {
+        java.nio.file.Path p = java.nio.file.Paths.get("src/main/java/com/asoft/ios/WadbPairService.java");
+        if (!java.nio.file.Files.exists(p)) {
+            p = java.nio.file.Paths.get("app/src/main/java/com/asoft/ios/WadbPairService.java");
+        }
+        assertTrue("WadbPairService.java must exist for regression check", java.nio.file.Files.exists(p));
+        String src = new String(java.nio.file.Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8);
+
+        // Must use PendingIntent.getService (upstream/Shizuku), never getForegroundService or getBroadcast for RemoteInput
+        assertTrue("Must use PendingIntent.getService for notification actions", src.contains("PendingIntent.getService("));
+        assertFalse("Must NOT use PendingIntent.getForegroundService (breaks RemoteInput on Android 16 / REDMAGIC OS 11)",
+                src.contains("PendingIntent.getForegroundService("));
+        assertFalse("Must NOT use PendingIntent.getBroadcast for RemoteInput",
+                src.contains("PendingIntent.getBroadcast("));
+
+        // Must keep null icon on Enter the code action and ask-gated show(String text, boolean ask)
+        assertTrue("Enter the code action must use null icon",
+                src.contains("new Notification.Action.Builder(null, \"Enter the code\""));
+        assertTrue("show() must accept boolean ask directly",
+                src.contains("private void show(String text, boolean ask)"));
+        assertFalse("show() must NOT force ask = !pairing (causes Enter the code to appear before pairing dialog opens)",
+                src.contains("boolean ask = !pairing"));
+    }
 }

@@ -57,40 +57,44 @@
 
 ---
 
-# Part 2 — UX, Stability, Split-Screen, Game Space & Wireless Debugging Fixes (`feat/ux-stability-pack`)
+# Part 2 — UX, Stability, Split-Screen, Game Space & Wireless Debugging Fixes (`work-ci-branch`)
 
-## Timeline & Branch Isolation
-- **Branch:** `feat/ux-stability-pack` (branched off `main` `a33a8c5`, so Upstream PR `#371` and `main` remain completely clean and unaffected; contains zero CI workflows and zero APK binaries).
-- **Implementation Commits:** `496b2c0` (`2026-11-23 20:09:41 UTC`), `2b45dfe` (docs), plus follow-up native notification inline-reply fix on `feat/ux-stability-pack`.
+## Timeline & Branch Structure
+- **Working Branch:** `work-ci-branch` (unified working branch containing all UX/stability fixes and `.github/workflows/apk-release.yml`, which automatically builds and overwrites pre-release tag `v0.1.7-ux-stability-test`).
+- **Upstream PR `#371` (`main`, `a33a8c5`):** Kept strictly clean with ONLY the Issue #92 KGSL fix (zero UX/stability or CI changes).
+- **Key Commits:** `496b2c0` (initial UX/stability pack), `d89fa07` (ZTE `GameActivityStub` isolation), `4c258d2` (exact upstream `WadbPairService` `RemoteInput` restoration), `3953cce` (unified `work-ci-branch`).
 
 ---
 
-## Bugs Fixed & Enhancements Added (27 files)
+## Bugs Fixed, Regressions Caught & Enhancements Added
 
-1. **Wireless Debugging Pairing Code Input in Notification Bar & Dialog (`WadbPairService.java`, `AdbMdns.java`, `MainActivity.java`, `AndroidManifest.xml`):**
-   - **Root Cause:** Upstream `WadbPairService` omitted the `"Enter the code"` `RemoteInput` action whenever mDNS discovery hadn't finished yet (`SEARCHING`), disappeared (`onServiceLost`), or after a failed attempt, and `AdbMdns.own()` compared `InetAddress.equals()` strictly (which rejects link-local IPv6 addresses on Android 14–16 when `scope_id` differs or `getHost()` is null). In our first test build (`496b2c0`), switching the `RemoteInput` `PendingIntent` to `PendingIntent.getBroadcast` (`ReplyReceiver`), setting a non-null `Icon`, and calling `NotificationManager.notify()` on every `AdbMdns` callback prevented inline text entry from opening/staying open when tapping `"Enter the code"` on Android 16 (REDMAGIC OS 11).
-   - **Fix:** Restore the proven upstream & Shizuku native inline-reply structure (`RemoteInput.Builder(KEY_CODE).setLabel("Pairing code")`, `null` action icons, `PendingIntent.getForegroundService` directly to `WadbPairService`, `startForeground(...)`, plus `FOREGROUND_SERVICE_IMMEDIATE` on API 31+), keep `"Enter the code"` available while pairing is active, and deduplicate notification updates (`shouldNotifyPortChange()` + `lastShownText`/`lastShownAsk` caching) so `AdbMdns` refreshes or transient drops never tear down an open `RemoteInput` field. Retain `parsePairInput()` (`123456`, `123 456`, `123456 37215`, `123456:37215`), `AdbMdns.ownAddress()` (raw IP byte matching & API >= 34 `getHostAddresses()`), empty-`RemoteInput` fallback logging/guidance, and the in-app **`Enter code here`** dialog (`showPairCodeDialog()`) in `MainActivity.wirelessDebugging()` for Split-Screen use.
+1. **Wireless Debugging Pairing Code Input in Notification Bar & Dialog (`WadbPairService.java`, `AdbMdns.java`, `MainActivity.java`, `WadbPairInputTest.java`):**
+   - **Regressions Caught & Root Causes:**
+     - *Regression 1 (`496b2c0`):* Switching `RemoteInput` to `PendingIntent.getBroadcast` (`ReplyReceiver`), adding a non-null `Icon`, and calling `NotificationManager.notify()` on every mDNS callback broke inline code entry on Android 16 (REDMAGIC OS 11).
+     - *Regression 2 (`d89fa07`):* Changing `PendingIntent.getService` to `PendingIntent.getForegroundService` (`selfForeground`) prevented tapping `"Enter the code"` from opening the inline `RemoteInput` box on Android 16 / REDMAGIC OS 11, and forcing `boolean ask = !pairing` caused `"Enter the code"` to appear immediately before Wireless Debugging / the pairing dialog was even open.
+   - **Final Fix (`4c258d2` + regression test):**
+     - Restored the **exact upstream & Shizuku native `RemoteInput` pattern**: `PendingIntent.getService(...)` (`self("code", ...)`), `null` action icons, `setOnlyAlertOnce(!ask)`, and `show(String text, boolean ask)` so `"Enter the code"` only appears when `AdbMdns` detects the open pairing dialog (`p > 0`) and hides again when it closes (`p <= 0`).
+     - Kept only safe, non-intrusive improvements: `shouldNotifyPortChange()` + `lastShownText`/`lastShownAsk` deduplication (prevents duplicate mDNS callbacks from closing the open keyboard), `parsePairInput()` (`123456`, `123 456`, `123456 37215`, `123456:37215`), `AdbMdns.ownAddress()` (raw IPv6 byte matching & API >= 34 `getHostAddresses()`), and the in-app **`Enter code here`** dialog (`showPairCodeDialog()`) in `MainActivity` for Split-Screen use.
+     - Added regression test `WadbPairInputTest.remoteInputUsesUpstreamPendingIntentGetServiceAndAskGating()` to enforce `PendingIntent.getService`, `null` icon, and `ask`-gated `show(String text, boolean ask)` permanently in CI.
 2. **Broken Setup Pause Button & Missing Helper-VM / Step-Boundary Pause (`PauseUi.java`, `SetupService.java`, `Setup26Screen.java`, `SetupScreen.java`, `PhoneSetup.java`, `PhoneSetup26.java`, `MainActivity.java`):**
    - **Root Cause:** Tapping `Pause` left the button clickable and unchanged during async stop; `Helper.hold` updated `state.held` (`SIGSTOP`) without setting `state.paused`; and non-interruptible steps (`:firstboot`, `:wallpaper`, `:pack`, `:unpack`, non-download iOS 16 steps) hid the Pause button completely instead of supporting deferred pause.
    - **Fix:** Synchronously set `state.pausing` / `state.pauseAfterStep` in `SetupService.pause(c)` so buttons immediately show greyed `"Pausing…"` or `"Pausing after step…"` (`enabled=false`, `alpha=0.4f`), synchronize `state.paused` inside `Helper.hold`, and check `Progress.stepPauseRequested()` between setup steps before starting the next step.
 3. **Split-Screen & Multi-Window Support + Zero-Dimension Crashes (`AndroidManifest.xml`, `ScreenActivity.java`, `ScreenGeometry.java`, `WatchCase.java`, `render.c`):**
    - **Root Cause:** Portrait orientation locks in `AndroidManifest.xml` & `ScreenActivity.onCreate()`, incomplete `configChanges`, stopping `Choreographer` in `onPause()` instead of `onStop()`, immersive bars fighting split-screen, and unguarded zero/negative dimensions in `render.c`, `ScreenActivity.guestPoint()`/`keepThumb()`, and `WatchCase.onMeasure()`.
    - **Fix:** Set `android:resizeableActivity="true"`, remove portrait locks, handle `onMultiWindowModeChanged` / `onConfigurationChanged`, keep frame rendering live between `onStart()` and `onStop()`, and guard all layout/touch/GL math via `ScreenGeometry` & `render.c` bounds checks.
-4. **REDMAGIC / OEM Game Space Mitigation, Survival Isolation & Upstream Issue #365 Attribution (`AndroidManifest.xml`, `GameEnvGuard.java`, `MainActivity.java`, `ScreenActivity.java`, `CrashText.java`, `AppExit.java`):**
-   - Set `android:appCategory="productivity"`.
-   - Added `GameEnvGuard`: `Window.setPreferMinimalPostProcessing(true)` (API 30+), `Surface.setFrameRate(60f, ...)` (API 30+), `GameManager` mode logging (API 31+), focus/`ACTION_CANCEL` burst/resize logging, and a dismissible Home warning banner when OEM Game Space (`com.zte.gameservice`, `com.nubia.gamelauncher`, etc.) is detected.
-   - Added `AppExit.shouldIsolateOemHookCrash()` so uncaught non-fatal exceptions solely inside injected OEM Game Space/Game Assistant background threads (e.g. ZTE `GameActivityStub` throwing `NullPointerException` in `KeyMapObserver.stop` during long helper-VM setups, Issue `#365`) are logged in `AppLog` and isolated to that hook thread instead of terminating the app and ongoing iOS setup/VM.
-   - Added `CrashText.gameAssistantKill()` and `AppExit` stack scanning so main-thread/native OEM Game Assistant crashes (`com.zte.gameassist`, etc., Issue `#365`) clearly identify Game Space as the external culprit.
+4. **REDMAGIC / OEM Game Space Mitigation, Survival Isolation & Upstream Issue #365 (`AndroidManifest.xml`, `GameEnvGuard.java`, `MainActivity.java`, `ScreenActivity.java`, `CrashText.java`, `AppExit.java`, `CrashPersistenceTest.java`):**
+   - **Real Device Crash Caught (`20261123-151237-crash-19565`):** On REDMAGIC Nova (`NP03J`, Android 16) during `ios26:rootfs`, ZTE's injected `GameActivityStub` background thread threw `NullPointerException: Attempt to invoke virtual method 'void android.view.KeyMapObserver.stop(android.app.Activity)' on a null object reference` at `com.zte.gameassist.app.GameActivityStub.unregisterObserver`, killing the app and ongoing 30-minute helper VM setup.
+   - **Fix:** Added `AppExit.shouldIsolateOemHookCrash()` to catch and log non-fatal exceptions solely inside injected OEM Game Space/Game Assistant background threads (with zero `com.asoft.ios.*` frames on the stack) so the app and helper VM survive unharmed. Also set `android:appCategory="productivity"`, added `GameEnvGuard` (`Window.setPreferMinimalPostProcessing`, `Surface.setFrameRate`, `GameManager` mode logging, dismissible Home warning banner), and `CrashText.gameAssistantKill()` attribution.
 5. **Freeze Watchdog, `fsync`ed Crash Persistence & UI Cleanups (`FreezeWatchdog.java`, `AsoftApp.java`, `AppExit.java`, `CrashReport.java`, `LogsActivity.java`, `SetupActivity.java`):**
    - Added `FreezeWatchdog` (main-thread stall detection `>= 4 s` writing bounded thread/stack snapshots via `FileOutputStream.getFD().sync()` to `files/run/last-ui-freeze.txt`), `onTrimMemory`/`onLowMemory` logging, subprocess (`:gpucheck`) uncaught exception logging, `fsync` on `AppExit.save()` and `CrashReport.write()`, automatic attachment of `kgsl-trace.txt` & `last-ui-freeze.txt` to crash/exit reports, horizontal scroll on `LogsActivity` actions, and destroyed-Activity guard in `SetupActivity.finishRun()`.
 
 ---
 
-## Verification Report (`feat/ux-stability-pack`)
+## Verification Report (`work-ci-branch`)
 
 - **NDK C Checks (`aarch64-linux-android29-clang`):** `render.c` (`-Wall -Werror`) & `kgsl_shim.c` (`-Wall -Wextra -Werror`) — **0 errors, 0 warnings**.
 - **C Host Unit Test (`gcc -DASOFT_SHIM_HOST_TEST -Wall -Wextra -Werror`):** `kgsl_shim_test` — **all assertions passed**.
-- **Android JVM Unit Tests (`./gradlew testDebugUnitTest`):** **50 suites, 418 tests (417 passed, 0 failed, 0 errors, 1 skipped** via JUnit assumption in `CounterFreqTest.aRealTreeLikeTheScript` on non-ARM64 devbox) — includes `PauseStateTest`, `GeometrySafetyTest`, `GameEnvGuardTest`, `CrashPersistenceTest`, and `WadbPairInputTest`.
-- **Android Lint (`./gradlew lintReportDebug`):** **0 new errors / `NewApi` warnings** in any modified or added file (only pre-existing upstream BOM error at `MiniJson.java:93`).
-- **Signed APK Verification:** Local debug APK verified with `apksigner` (v2 scheme, 1 signer).
+- **Android JVM Unit Tests (`./gradlew testDebugUnitTest`):** **50 suites, 419 tests (418 passed, 0 failed, 0 errors, 1 skipped** via JUnit assumption on non-ARM64 devbox) — includes `PauseStateTest`, `GeometrySafetyTest`, `GameEnvGuardTest`, `CrashPersistenceTest`, and `WadbPairInputTest` (including `remoteInputUsesUpstreamPendingIntentGetServiceAndAskGating`).
+- **Android Lint (`./gradlew lintReportDebug`):** **0 new errors / `NewApi` warnings** in any modified or added file.
+
 
