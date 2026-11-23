@@ -14,3 +14,8 @@ target_link_libraries(gpucheck dl)
 # segments and IM4P payloads, and hole punching behind a decrypt
 add_library(unpack SHARED unpack.c lzfse/lzfse_decode.c lzfse/lzfse_decode_base.c lzfse/lzfse_fse.c lzfse/lzvn_decode_base.c)
 target_compile_options(unpack PRIVATE -O3 -Wall -Wno-unused-variable -Wno-unused-function)
+
+# iOS 26 Snapdragon/KGSL Vulkan ICD wrapper + LD_PRELOAD shim (Upstream Issue #92)
+add_library(kgslshim SHARED kgsl_shim.c)
+target_compile_options(kgslshim PRIVATE -O2 -Wall -Wextra)
+target_link_libraries(kgslshim log dl)

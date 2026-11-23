@@ -3,9 +3,8 @@ package com.asoft.ios;
 import android.content.Context;
 
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
@@ -34,11 +33,32 @@ final class AppLog {
         }
     }
 
+    static void writeLineSync(File f, String line, boolean sync) throws IOException {
+        byte[] bytes = (line + "\n").getBytes(StandardCharsets.UTF_8);
+        try (FileOutputStream fos = new FileOutputStream(f, true)) {
+            fos.write(bytes);
+            fos.flush();
+            if (sync) {
+                try {
+                    fos.getFD().sync();
+                } catch (IOException ignored) {
+                    // filesystems that refuse fsync keep the flushed write
+                }
+            }
+        }
+    }
+
     private static void note0(Context c, String s) {
         String line = new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date()) + " " + s;
+        boolean sync = false;
+        try {
+            sync = CompatConfig.syncLogging(c);
+        } catch (RuntimeException ignored) {
+            sync = false;
+        }
         for (File f : new File[] {new File(Guest.runDir(c), "app.txt"), new File(dir(c), "app.txt")}) {
-            try (PrintWriter w = new PrintWriter(new FileWriter(f, true))) {
-                w.println(line);
+            try {
+                writeLineSync(f, line, sync);
             } catch (IOException ignored) {
                 // nowhere to say it
             }
@@ -47,7 +67,7 @@ final class AppLog {
 
     /** QEMU's and the guest's last lines, before a new start overwrites them. */
     static void keepRunLogs(Context c) {
-        for (String n : new String[] {"qemu-stderr.txt", "serial.txt"}) {
+        for (String n : new String[] {"qemu-stderr.txt", "serial.txt", CompatConfig.TRACE_FILE}) {
             File from = new File(Guest.runDir(c), n);
             if (!from.isFile()) {
                 continue;

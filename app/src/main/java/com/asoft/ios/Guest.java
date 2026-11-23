@@ -264,6 +264,20 @@ final class Guest {
         }
         return json;
     }
+
+    /** Shimmed Turnip ICD pointing to libkgslshim.so (delegates to real Turnip via ASOFT_REAL_TURNIP_PATH). */
+    static File writeShimmedVulkanIcd(Context c) throws IOException {
+        File d = new File(c.getFilesDir(), "vulkan");
+        d.mkdirs();
+        File json = new File(d, "turnip_icd_shim.json");
+        File shim = new File(c.getApplicationInfo().nativeLibraryDir, CompatConfig.SHIM_LIB);
+        try (PrintWriter w = new PrintWriter(new FileWriter(json))) {
+            w.println("{\"file_format_version\": \"1.0.1\", \"ICD\": {\"library_path\": \""
+                    + shim.getPath()
+                    + "\", \"api_version\": \"1.4.354\", \"library_arch\": \"64\"}}");
+        }
+        return json;
+    }
     /**
      * The quick-boot state's name inside the user disk (qcow2 internal snapshot). It lives in one of
      * two slots, QUICK and QUICK_B: a new quick save goes into the other slot and the old one is
@@ -2427,10 +2441,28 @@ final class Guest {
         // only the phone's own driver (sys): a Snapdragon's Turnip compatibility mode keeps the environment it had
         importMarkerAtStart = compat26 && sys && ImportMode.marker(run).isFile();
         env.putAll(ImportMode.envAdditions(compat26 && sys, importMarkerAtStart, ov));
+        boolean ios26Compat = !watch && compat26;
+        CompatConfig.Config compatCfg = CompatConfig.load(c);
+        boolean icdShimmed = CompatConfig.shouldUseIcdShim(ios26Compat, sys, compatCfg);
+        if (icdShimmed && !ov.containsKey("env.VK_DRIVER_FILES")) {
+            File shimIcd = writeShimmedVulkanIcd(c);
+            env.put("VK_DRIVER_FILES", shimIcd.getPath());
+        }
+        env.putAll(CompatConfig.envAdditions(
+                ios26Compat,
+                sys,
+                compatCfg,
+                new File(c.getApplicationInfo().nativeLibraryDir),
+                links,
+                run,
+                ov));
         if (compat26) {
             AppLog.note(c, "gpu: compatibility mode (no sparse binds from host memory)");
             if (sys) {
                 AppLog.note(c, ImportMode.describe(env, importMarkerAtStart));
+            }
+            if (ios26Compat) {
+                AppLog.note(c, CompatConfig.describe(compatCfg, icdShimmed));
             }
         }
         if (sys) {

@@ -160,7 +160,16 @@ Java_com_asoft_ios_Render_spawn(JNIEnv *env, jclass cls, jobjectArray jargv, job
         (*env)->ReleaseStringUTFChars(env, s, c);
     }
     const char *lc = (*env)->GetStringUTFChars(env, jlog, NULL);
-    int log = open(lc, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    int sync_log = 0;
+    for (int i = 0; i < ne && !sync_log; i++) {
+        if (strcmp(envp[i], "ASOFT_SYNC_LOG=1") == 0) {
+            sync_log = 1;
+        }
+    }
+    int log = open(lc, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | (sync_log ? O_SYNC : 0), 0600);
+    if (log < 0 && sync_log) {
+        log = open(lc, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    }
     (*env)->ReleaseStringUTFChars(env, jlog, lc);
     int null = open("/dev/null", O_RDONLY | O_CLOEXEC);
     const char *cc = (*env)->GetStringUTFChars(env, jcwd, NULL);
