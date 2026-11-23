@@ -49,6 +49,14 @@ final class PhoneSetup {
          */
         default void hold(String note) {
         }
+
+        /**
+         * True when the user asked to pause between steps (e.g. while a non-interruptible step such as
+         * :firstboot ran): checked right before the next step begins.
+         */
+        default boolean stepPauseRequested() {
+            return false;
+        }
     }
 
     static final String[] STEPS = {"ipsw", "payload", "disk", "pack", "install", "firststart"};
@@ -134,11 +142,17 @@ final class PhoneSetup {
         }
         File payload = new File(w, "payload.bin");
         if (!done(c, "payload")) {
+            if (cancelled.getAsBoolean() || p.stepPauseRequested()) {
+                throw new IOException("stopped");
+            }
             payload(c, ios16, ipsw, payload, cpus, p, cancelled);
             setDone(c, "payload");
         }
         File root = new File(w, "root.qcow2"), scratch = new File(w, "scratch.qcow2");
         if (!done(c, "disk")) {
+            if (cancelled.getAsBoolean() || p.stepPauseRequested()) {
+                throw new IOException("stopped");
+            }
             disk(c, ipsw, root, scratch, cpus, p, cancelled);
             setDone(c, "disk");
         }
@@ -147,6 +161,9 @@ final class PhoneSetup {
         scratch.delete();
         File disk = new File(w, "disk.qcow2");
         if (!done(c, "pack")) {
+            if (cancelled.getAsBoolean() || p.stepPauseRequested()) {
+                throw new IOException("stopped");
+            }
             p.step("pack", -1, "Packing the iOS disk");
             disk.delete();
             String[] r = Emu.qemuImg(c, "convert", "-O", "qcow2", "-c", "-o", "compression_type=zstd", root.getPath(), disk.getPath());
@@ -158,6 +175,9 @@ final class PhoneSetup {
         }
         root.delete();
         if (!done(c, "install")) {
+            if (cancelled.getAsBoolean() || p.stepPauseRequested()) {
+                throw new IOException("stopped");
+            }
             p.step("install", -1, "Setting iOS up in the app");
             try (FileOutputStream o = new FileOutputStream(new File(w, "asoft-bundle.json"))) {
                 JSONObject m = new JSONObject();
@@ -177,6 +197,9 @@ final class PhoneSetup {
             setDone(c, "install");
         }
         if (!done(c, "firststart")) {
+            if (cancelled.getAsBoolean() || p.stepPauseRequested()) {
+                throw new IOException("stopped");
+            }
             firstStart(c, p, cancelled);
             setDone(c, "firststart");
         }

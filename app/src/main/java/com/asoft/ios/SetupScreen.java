@@ -152,8 +152,17 @@ final class SetupScreen {
 
     private void onPrimary() {
         SetupService.State s = SetupService.state;
-        if (s.running && !s.paused) {
-            SetupService.pause(a);
+        if (s.running) {
+            if (s.pausing || s.pauseAfterStep) {
+                return;
+            }
+            if (s.paused) {
+                s.paused = false;
+                SetupService.start(a);
+            } else {
+                SetupService.pause(a);
+            }
+            update();
         } else if (Guest.running()) {
             s.record = null;
             s.error = "Close iOS first (side bar > Saves > Save and close): the setup needs its memory.";
@@ -276,11 +285,13 @@ final class SetupScreen {
         memory.setText(note == null ? "" : note);
         memory.setVisibility(running && note != null ? View.VISIBLE : View.GONE);
 
-        // the buttons: only the download pauses (a helper VM step or iOS's first start would have to start over)
-        primary.setText(running ? (s.paused ? "Resume" : "Pause") : started && !complete ? "Resume" : "Set up");
-        primary.setVisibility(complete || running && !s.paused && !"ipsw".equals(s.step) ? View.GONE : View.VISIBLE);
-        primary.setEnabled(!other);
-        primary.setAlpha(other ? 0.4f : 1f);
+        // the buttons: pauses downloads cleanly and pauses after non-interruptible steps
+        PauseUi.ButtonState b = PauseUi.setup16Button(complete, running, s.paused, s.pausing, s.pauseAfterStep,
+                SetupService.pausable(s.step), started, other);
+        primary.setText(b.label);
+        primary.setVisibility(b.visible ? View.VISIBLE : View.GONE);
+        primary.setEnabled(b.enabled);
+        primary.setAlpha(b.alpha);
         cancel.setVisibility(!complete && !other && (running || started) ? View.VISIBLE : View.GONE);
         sec.follow(running);
 

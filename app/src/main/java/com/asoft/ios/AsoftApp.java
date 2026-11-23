@@ -13,10 +13,40 @@ public class AsoftApp extends Application {
         super.onCreate();
         // the GPU check runs in a process of its own (GpuCheckService): a driver that crashes takes only that one,
         // and its check says so itself
-        if (getPackageName().equals(Application.getProcessName())) {
+        String proc = Application.getProcessName();
+        if (getPackageName().equals(proc)) {
             AppExit.onStart(this);
+            FreezeWatchdog.install(this);
+            registerComponentCallbacks(new android.content.ComponentCallbacks2() {
+                @Override
+                public void onTrimMemory(int level) {
+                    if (level >= TRIM_MEMORY_RUNNING_LOW) {
+                        AppLog.note(AsoftApp.this, "memory: onTrimMemory " + GameEnvGuard.trimLevelName(level));
+                    }
+                }
+
+                @Override
+                public void onConfigurationChanged(android.content.res.Configuration newConfig) {}
+
+                @Override
+                public void onLowMemory() {
+                    AppLog.note(AsoftApp.this, "memory: onLowMemory");
+                }
+            });
             // off the main thread: a phone whose counter register reads 0 measures it, which sleeps 0.3 s
             new Thread(() -> CounterFreq.logOnce(this), "counter").start();
+        } else {
+            Thread.UncaughtExceptionHandler before = Thread.getDefaultUncaughtExceptionHandler();
+            Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+                try {
+                    AppLog.note(AsoftApp.this, "subprocess crash (" + proc + ", " + t.getName() + "): " + e);
+                } catch (Throwable ignored) {
+                    // never block default crash handling
+                }
+                if (before != null) {
+                    before.uncaughtException(t, e);
+                }
+            });
         }
     }
 }

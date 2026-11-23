@@ -70,8 +70,9 @@ public class MainActivity extends Activity {
     private LinearLayout box;
     private final Panel p26 = new Panel(Guest.IOS26), p16 = new Panel(Guest.IOS16), pWatch = new Panel(Guest.WATCH);
     private TextView hint, powerWarn, freeRamValue, setupScreenValue, wadbValue, compat26Value, updateValue, logsValue, footer, engineLog;
-    private LinearLayout updateBar, advanced;
-    private TextView updateText, updateNote, updateGet, updateDismiss;
+    private LinearLayout updateBar, gameSpaceBar, advanced;
+    private TextView updateText, updateNote, updateGet, updateDismiss, gameSpaceText;
+    private String gameSpacePkg;
     /**
      * The clock check again every 10 s while this screen shows: at onResume the phone has just
      * lifted its CPU cap for the app's launch (A71: 2.21 GHz then, 1.56 a few seconds later).
@@ -123,7 +124,8 @@ public class MainActivity extends Activity {
         public void run() {
             // (a crash record comes a moment after QEMU's end, from its own thread: its notice counts as a change)
             String now = Guest.running() + " " + Guest.state + " " + Guest.os(MainActivity.this) + " " + Guest.saving() + " "
-                    + SetupService.busy() + " " + SetupService.state.step + SetupService.state.pct + SetupService.state.paused + " "
+                    + SetupService.busy() + " " + SetupService.state.step + SetupService.state.pct
+                    + SetupService.state.paused + SetupService.state.pausing + SetupService.state.pauseAfterStep + " "
                     + Guest.startError + " " + CrashReport.pendingKey(MainActivity.this);
             if (!now.equals(shown)) {
                 shown = now;
@@ -411,6 +413,7 @@ public class MainActivity extends Activity {
         wlp.bottomMargin = dp(12);
         box.addView(powerWarn, wlp);
         powerWarn.setVisibility(View.GONE);
+        addGameSpaceBanner();
 
         box.addView(buildPanel(p26, "iOS 26", DeviceView.ISLAND, new int[] {0xff5a9bff, 0xff4a5df0, 0xff5b36cf}),
                 new LinearLayout.LayoutParams(-1, -2));
@@ -502,6 +505,7 @@ public class MainActivity extends Activity {
         shown = "";
         follow.run();
         showUpdate();
+        showGameSpaceBanner();
         UpdateCheck.check(this, this::showUpdate);
         powerWarn.postDelayed(powerRecheck, 3_000);
     }
@@ -512,6 +516,51 @@ public class MainActivity extends Activity {
         powerWarn.removeCallbacks(powerRecheck);
         footer.removeCallbacks(follow);
         super.onPause();
+    }
+
+    private void addGameSpaceBanner() {
+        gameSpaceBar = new LinearLayout(this);
+        gameSpaceBar.setOrientation(LinearLayout.VERTICAL);
+        gameSpaceBar.setBackground(round(0xff241b0b, 18));
+        gameSpaceBar.setPadding(dp(16), dp(12), dp(16), dp(10));
+        gameSpaceText = text(gameSpaceBar, "", 13.5f, ORANGE);
+        gameSpaceText.setLineSpacing(dp(1.5f), 1f);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, dp(6), 0, 0);
+        TextView openSettings = link("App settings", ORANGE, v -> GameEnvGuard.openGameSpaceSettings(this, gameSpacePkg));
+        openSettings.setPadding(0, dp(4), dp(18), dp(4));
+        TextView dismiss = link("Dismiss", 0xffa87a32, v -> {
+            GameEnvGuard.dismissBanner(this);
+            showGameSpaceBanner();
+        });
+        dismiss.setPadding(0, dp(4), dp(8), dp(4));
+        actions.addView(openSettings);
+        actions.addView(dismiss);
+        gameSpaceBar.addView(actions);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(12);
+        box.addView(gameSpaceBar, lp);
+        gameSpaceBar.setVisibility(View.GONE);
+    }
+
+    private void showGameSpaceBanner() {
+        if (gameSpaceBar == null) {
+            return;
+        }
+        if (GameEnvGuard.isBannerDismissed(this)) {
+            gameSpaceBar.setVisibility(View.GONE);
+            return;
+        }
+        if (gameSpacePkg == null) {
+            gameSpacePkg = GameEnvGuard.detectGameSpacePackage(this);
+        }
+        if (gameSpacePkg == null) {
+            gameSpaceBar.setVisibility(View.GONE);
+            return;
+        }
+        gameSpaceText.setText(GameEnvGuard.warningMessage(gameSpacePkg));
+        gameSpaceBar.setVisibility(View.VISIBLE);
     }
 
     /**
@@ -1566,6 +1615,7 @@ public class MainActivity extends Activity {
                     .setTitle("Pairing")
                     .setMessage(WadbPairService.state)
                     .setPositiveButton("Open Developer options", (d, w) -> openDeveloperOptions())
+                    .setNeutralButton("Enter code here", (d, w) -> showPairCodeDialog())
                     .setNegativeButton("Close", null)
                     .show();
             return;
@@ -1605,6 +1655,36 @@ public class MainActivity extends Activity {
                         + "Only this app, on this phone, uses the pairing. After a restart of the phone Wireless debugging is "
                         + "off until you turn it on again.")
                 .setPositiveButton("Pair", (d, w) -> startPairing())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showPairCodeDialog() {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(22), dp(8), dp(22), 0);
+        android.widget.EditText codeInput = new android.widget.EditText(this);
+        codeInput.setHint("6-digit code");
+        codeInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        form.addView(codeInput);
+        android.widget.EditText portInput = new android.widget.EditText(this);
+        int found = WadbPairService.detectedPort();
+        portInput.setHint(found > 0 ? "Port (auto: " + found + ")" : "Port (e.g. 37215 if not auto-detected)");
+        if (found > 0) {
+            portInput.setText(String.valueOf(found));
+        }
+        portInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        form.addView(portInput);
+        new AlertDialog.Builder(this)
+                .setTitle("Enter Wireless debugging code")
+                .setMessage("Tip: in Split-Screen you can keep Settings' pairing dialog open beside ASoftware iOS so its code stays valid.")
+                .setView(form)
+                .setPositiveButton("Pair", (d, w) -> {
+                    String c = codeInput.getText().toString().trim();
+                    String p = portInput.getText().toString().trim();
+                    WadbPairService.submitFromUi(this, p.isEmpty() ? c : c + " " + p);
+                    Toast.makeText(this, "Pairing started… check notification or Settings.", Toast.LENGTH_SHORT).show();
+                })
                 .setNegativeButton("Cancel", null)
                 .show();
     }

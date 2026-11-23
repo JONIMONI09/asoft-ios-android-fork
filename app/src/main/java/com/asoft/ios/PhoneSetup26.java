@@ -270,7 +270,7 @@ final class PhoneSetup26 {
                     if (done(c, g, s[0])) {
                         continue;
                     }
-                    if (cancelled.getAsBoolean()) {
+                    if (cancelled.getAsBoolean() || p.stepPauseRequested()) {
                         throw new IOException("stopped");
                     }
                     long need = (long) ((addGB(g, s[0]) + 1.5) * 1e9), free = c.getFilesDir().getUsableSpace();

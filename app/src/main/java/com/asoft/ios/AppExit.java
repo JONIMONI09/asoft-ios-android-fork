@@ -126,7 +126,10 @@ final class AppExit {
         File tmp = new File(f.getPath() + ".tmp");
         try (FileOutputStream o = new FileOutputStream(tmp)) {
             p.store(o, "what the app was doing (AppExit)");
+            o.flush();
+            o.getFD().sync();
         } catch (IOException e) {
+            tmp.delete();
             return;
         }
         tmp.renameTo(f);
@@ -188,12 +191,58 @@ final class AppExit {
     // -- the start
 
     /**
+     * Whether an uncaught exception belongs solely to an injected OEM Game Space / Game Assistant
+     * background thread (such as ZTE {@code GameActivityStub} throwing in {@code KeyMapObserver.stop})
+     * with no app code on its stack. Isolating these non-fatal background threads prevents OEM hooks
+     * from killing long-running setups or emulated guests.
+     */
+    static boolean shouldIsolateOemHookCrash(Thread t, Throwable e, Thread mainThread) {
+        if (t == null || e == null || !(e instanceof Exception)) {
+            return false;
+        }
+        String tName = t.getName();
+        if ((mainThread != null && t == mainThread) || "main".equals(tName)) {
+            return false;
+        }
+        boolean sawOemGameHook = tName != null
+                && (tName.startsWith("GameActivityStub") || tName.startsWith("GameAssist"));
+        Throwable cur = e;
+        int depth = 0;
+        while (cur != null && depth++ < 8) {
+            for (StackTraceElement el : cur.getStackTrace()) {
+                String cls = el.getClassName();
+                if (cls.startsWith("com.asoft.ios.")) {
+                    return false;
+                }
+                if (CrashText.gameAssistantKill(cls)) {
+                    sawOemGameHook = true;
+                }
+            }
+            cur = cur.getCause();
+        }
+        return sawOemGameHook;
+    }
+
+    /**
      * The main process starts (AsoftApp): the handler goes in, the marker a process before left is read (and
      * removed, before anything of this process writes its own), and its end is looked into off the main thread.
      */
     static void onStart(Application a) {
         Thread.UncaughtExceptionHandler before = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try {
+                Thread mainThread = null;
+                try {
+                    mainThread = android.os.Looper.getMainLooper().getThread();
+                } catch (Throwable ignored) {
+                }
+                if (shouldIsolateOemHookCrash(t, e, mainThread)) {
+                    AppLog.note(a, "survived OEM Game Space hook crash on background thread "
+                            + (t == null ? "?" : t.getName()) + ": " + e);
+                    return;
+                }
+            } catch (Throwable ignored) {
+            }
             try {
                 crashed(a, t, e);
             } catch (Throwable ignored) {
@@ -243,14 +292,21 @@ final class AppExit {
             activity = activity(now);
             logAt = logAt(now);
         }
+        List<String> javaStack = SetupRecord.stack(e);
+        boolean gaCrash = CrashText.gameAssistantKill(String.valueOf(e))
+                || CrashText.gameAssistantKill(String.join("\n", javaStack));
         String msg = e.getMessage();
-        String what = "The app crashed" + (activity == null ? "" : " while " + activity) + ": " + e.getClass().getSimpleName()
-                + (msg == null ? "" : ": " + msg);
+        String what = gaCrash
+                ? "The phone's Game Space / Game Assistant crashed inside ASoftware iOS"
+                        + (activity == null ? "" : " while " + activity)
+                : "The app crashed" + (activity == null ? "" : " while " + activity) + ": " + e.getClass().getSimpleName()
+                        + (msg == null ? "" : ": " + msg);
         LinkedHashMap<String, String> h = new LinkedHashMap<>();
         h.put("os", "0");
         h.put("guest", "The app");
         h.put("what", what.length() > 300 ? what.substring(0, 299) + "…" : what);
-        h.put("cause", String.valueOf(e));
+        h.put("cause", gaCrash ? "Game Space / Game Assistant hook crashed (" + e + "); exclude ASoftware iOS from Game Space"
+                : String.valueOf(e));
         h.put("crash", "yes");
         h.put("reason", CrashText.exitName(CrashText.EXIT_CRASH) + ", seen by the app's uncaught-exception handler");
         h.put("thread", t.getName());
@@ -259,7 +315,12 @@ final class AppExit {
         h.put("phone", CrashReport.phone());
         h.put("memory", CrashReport.memInfo());
         LinkedHashMap<String, List<String>> s = new LinkedHashMap<>();
-        s.put("java stack trace", SetupRecord.stack(e));
+        s.put("java stack trace", javaStack);
+        s.put("all threads", FreezeWatchdog.formatFreezeReport(0, e.getStackTrace(), Thread.getAllStackTraces(), null, null));
+        File uiFreeze = new File(Guest.runDir(c), FreezeWatchdog.FILE_NAME);
+        if (uiFreeze.isFile()) {
+            s.put("UI freeze snapshot", CrashReport.tail(uiFreeze, 80));
+        }
         s.put(CrashText.RUN_APPLOG, CrashReport.appLog(c, logAt, -1, 150));
         String id = CrashReport.write(c, CrashReport.APP, "crash-" + android.os.Process.myPid(), System.currentTimeMillis(), h, s,
                 "last-app-exit.txt", true);
@@ -420,6 +481,14 @@ final class AppExit {
             File run = Guest.runDir(c);
             s.put("the guest's QEMU stderr", CrashReport.stderrEvidence(new File(run, "qemu-stderr.txt")));
             s.put("the guest's console (serial.txt)", CrashReport.tail(new File(run, "serial.txt"), 100));
+            File kgslTrace = new File(run, "kgsl-trace.txt");
+            if (kgslTrace.isFile()) {
+                s.put("KGSL shim trace", CrashReport.tail(kgslTrace, 120));
+            }
+        }
+        File uiFreeze = new File(Guest.runDir(c), FreezeWatchdog.FILE_NAME);
+        if (uiFreeze.isFile()) {
+            s.put("UI freeze snapshot", CrashReport.tail(uiFreeze, 80));
         }
         long logAt = old == null ? -1 : logAt(old);
         s.put("app log of that run", CrashReport.appLog(c, logAt, logEnd, 150));

@@ -310,8 +310,25 @@ final class CrashText {
                 || d.contains("miui") || d.contains("hw_") || d.contains("smartpower");
     }
 
+    /**
+     * Whether a crash description or stack mentions an OEM Game Space / Game Assistant injection
+     * (e.g. REDMAGIC com.zte.gameassist / com.zte.gameservice, upstream #365).
+     */
+    static boolean gameAssistantKill(String text) {
+        if (text == null) {
+            return false;
+        }
+        String d = text.toLowerCase(java.util.Locale.ROOT);
+        return d.contains("gameassist") || d.contains("gameservice") || d.contains("gamelauncher")
+                || d.contains("gametools") || d.contains("game_assist");
+    }
+
     /** The reason in plain words: "low memory", "killed (signal 9), usually Android freeing memory". */
     static String exitWords(int reason, int status, String description) {
+        if (gameAssistantKill(description)) {
+            return "the phone's Game Space / Game Assistant crashed inside the app (" + cap(description, 120)
+                    + "); remove ASoftware iOS from Game Space / Game Assistant";
+        }
         switch (reason) {
             case EXIT_LOW_MEMORY:
                 return "low memory";

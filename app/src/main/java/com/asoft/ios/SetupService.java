@@ -37,7 +37,7 @@ public class SetupService extends Service {
         volatile String text = "";
         volatile String error;                  // why it stopped, in plain words; null while it runs or when done
         volatile String record;                 // the record of that stop (SetupRecord), for the screens' Share log; null without one
-        volatile boolean running, paused, waitingForWifi, waitingForNetwork, finished, held;
+        volatile boolean running, paused, pausing, pauseAfterStep, waitingForWifi, waitingForNetwork, finished, held;
         volatile String holdNote;               // while held for heat or battery: why, in plain words (HoldRule.Hold.note)
         volatile String target = "ios16";       // "ios16" (PhoneSetup) or "a26" (PhoneSetup26: iOS 26 and/or watchOS)
         volatile List<IpswFetch.Item> items = new ArrayList<>();
@@ -130,6 +130,16 @@ public class SetupService extends Service {
     }
 
     static void pause(Context c) {
+        if (state.running && !state.paused && !cancel) {
+            pause = true;
+            if (pausable(state.step) || worker == null) {
+                state.pausing = true;
+                state.pauseAfterStep = false;
+            } else {
+                state.pauseAfterStep = true;
+                state.pausing = false;
+            }
+        }
         c.startService(new Intent(c, SetupService.class).setAction("pause"));
     }
 
@@ -190,10 +200,15 @@ public class SetupService extends Service {
             } else {
                 n.setProgress(0, 0, true);
             }
-            if (state.paused || pause || pausable(state.step)) {
-                n.addAction(new Notification.Action.Builder(null, state.paused || pause ? "Resume" : "Pause",
+            if (state.paused) {
+                n.addAction(new Notification.Action.Builder(null, "Resume",
                         PendingIntent.getService(this, 1, new Intent(this, SetupService.class)
-                                .setAction(state.paused || pause ? "start" : "pause"), PendingIntent.FLAG_IMMUTABLE)).build());
+                                .setAction("start"), PendingIntent.FLAG_IMMUTABLE)).build());
+            } else if (!state.pausing && !state.pauseAfterStep) {
+                String actionLabel = pausable(state.step) ? "Pause" : "Pause after step";
+                n.addAction(new Notification.Action.Builder(null, actionLabel,
+                        PendingIntent.getService(this, 1, new Intent(this, SetupService.class)
+                                .setAction("pause"), PendingIntent.FLAG_IMMUTABLE)).build());
             }
             n.addAction(new Notification.Action.Builder(null, "Cancel",
                     PendingIntent.getService(this, 2, new Intent(this, SetupService.class).setAction("cancel"),
@@ -215,14 +230,25 @@ public class SetupService extends Service {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         switch (a) {
             case "pause":
+                if (state.paused) {
+                    break;
+                }
+                pause = true;
                 if (pausable(state.step) || worker == null) {
-                    pause = true;
+                    state.pausing = true;
+                    state.pauseAfterStep = false;
                     post("Pausing: " + state.text, state.pct);
+                } else {
+                    state.pauseAfterStep = true;
+                    state.pausing = false;
+                    post("Pausing after step: " + state.text, state.pct);
                 }
                 break;
             case "cancel":
                 cancel = true;
                 pause = false;
+                state.pausing = false;
+                state.pauseAfterStep = false;
                 if (worker == null) {
                     // (a Cancel that names its target, cancel(c, target), is for that setup, whatever the service ran last)
                     String target = SetupCancel.target(intent == null ? null : intent.getStringExtra("what"), state.target);
@@ -233,10 +259,15 @@ public class SetupService extends Service {
                         stopForeground(STOP_FOREGROUND_REMOVE);
                         stopSelf();
                     }, "setup-cancel").start();
+                } else {
+                    worker.interrupt();
                 }
                 break;
             default:
                 pause = false;
+                state.pausing = false;
+                state.pauseAfterStep = false;
+                state.paused = false;
                 if (worker == null) {
                     String what = intent == null ? null : intent.getStringExtra("what");
                     if (what != null) {
@@ -342,6 +373,8 @@ public class SetupService extends Service {
         state.finished = false;
         state.running = true;
         state.paused = false;
+        state.pausing = false;
+        state.pauseAfterStep = false;
         watchNetwork();
         if (wakeLock == null) {
             wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "asoft:setup");
@@ -355,14 +388,24 @@ public class SetupService extends Service {
         HoldRule rule = new HoldRule(true);
         Helper.hold = () -> {
             HoldRule.Hold d = rule.decide(PhoneSetup26.thermal(this), PhoneSetup26.lowBattery(this), android.os.SystemClock.elapsedRealtime());
-            boolean h = pause || d.holding;
-            if (h != state.held) {
-                Helper.holdWhy = pause ? "paused" : d.log();
-                state.holdNote = h && !pause ? d.note() : null;
-                state.held = h;
-                post(h ? (state.holdNote != null ? state.holdNote : "Paused") : state.text + (state.pct >= 0 ? " (" + state.pct + "%)" : ""), state.pct);
+            boolean wantPaused = pause && !cancel;
+            boolean wantHeld = wantPaused || d.holding;
+            if (wantPaused != state.paused || wantHeld != state.held) {
+                if (wantPaused) {
+                    state.pausing = false;
+                    state.pauseAfterStep = false;
+                    state.paused = true;
+                } else {
+                    state.paused = false;
+                }
+                Helper.holdWhy = wantPaused ? "paused" : d.log();
+                state.holdNote = wantHeld && !wantPaused ? d.note() : null;
+                state.held = wantHeld;
+                String msg = wantPaused ? "Paused"
+                        : (state.holdNote != null ? state.holdNote : state.text + (state.pct >= 0 ? " (" + state.pct + "%)" : ""));
+                post(msg, state.pct);
             }
-            return h;
+            return wantHeld;
         };
         worker = new Thread(() -> {
             long t0 = System.currentTimeMillis();
@@ -373,7 +416,7 @@ public class SetupService extends Service {
             AppExit.begin(this, AppExit.SETUP, setupName(a26) + " was running");
             AppLog.note(this, "setup: start (" + getFilesDir().getUsableSpace() / 1_000_000_000L + " GB free)");
             try {
-                // what the wait below last told the log and the notification: "", "net" or "wifi"
+                // what the wait below last told the log and the notification: "", "pause", "net" or "wifi"
                 String waitShown = "";
                 long netSince = 0, lastRecheck = System.currentTimeMillis();
                 while (!cancel) {
@@ -386,9 +429,11 @@ public class SetupService extends Service {
                             recheckNetwork();
                         }
                         state.paused = true;
+                        state.pausing = false;
+                        state.pauseAfterStep = false;
                         state.waitingForWifi = !pause && noWifi();
                         state.waitingForNetwork = !pause && noNetwork();
-                        String kind = state.waitingForNetwork ? "net" : state.waitingForWifi ? "wifi" : "";
+                        String kind = state.waitingForNetwork ? "net" : state.waitingForWifi ? "wifi" : "pause";
                         if (!kind.equals(waitShown)) {
                             if ("net".equals(kind)) {
                                 netSince = now;
@@ -396,9 +441,12 @@ public class SetupService extends Service {
                             } else if ("net".equals(waitShown)) {
                                 AppLog.note(this, "setup: the network is back after " + (now - netSince) / 60_000 + " min");
                             }
-                            if (!kind.isEmpty()) {
-                                // (the fetcher posts nothing while this loop waits; the same wording as the screens)
-                                post("net".equals(kind) ? "Waiting for a network" : "Waiting for Wi-Fi (Download on Wi-Fi only is on)", state.pct);
+                            if ("net".equals(kind)) {
+                                post("Waiting for a network", state.pct);
+                            } else if ("wifi".equals(kind)) {
+                                post("Waiting for Wi-Fi (Download on Wi-Fi only is on)", state.pct);
+                            } else {
+                                post("Paused", state.pct);
                             }
                             waitShown = kind;
                         }
@@ -472,10 +520,14 @@ public class SetupService extends Service {
                     AppLog.note(this, "setup: cancelled");
                 }
             } catch (InterruptedException e) {
-                state.error = "Stopped";
+                if (!cancel) {
+                    state.error = "Stopped";
+                }
             } finally {
                 state.running = false;
                 state.paused = false;
+                state.pausing = false;
+                state.pauseAfterStep = false;
                 state.held = false;
                 state.holdNote = null;
                 Helper.hold = null;
@@ -535,6 +587,15 @@ public class SetupService extends Service {
             int loggedPct = -100;
             /** The step of the last call, null before the first. */
             String stepWas;
+
+            @Override
+            public boolean stepPauseRequested() {
+                if (pause && !cancel) {
+                    stopWhy = SetupStop.PAUSE;
+                    return true;
+                }
+                return false;
+            }
 
             @Override
             public void step(String step, int pct, String text) {
