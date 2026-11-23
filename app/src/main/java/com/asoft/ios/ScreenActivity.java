@@ -99,6 +99,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     /** The pointer iOS has as its finger (both guests' touchscreens are single-touch), -1 when none; where it is (0..1). */
     private int finger = -1;
     private float fingerX, fingerY;
+    private final GameEnvGuard envGuard = new GameEnvGuard();
     /** ios26.txt touchlog=1 (debug builds): every MotionEvent and what went to iOS, in files/run/touch.txt. */
     private java.io.PrintWriter touchLog;
     private final android.content.BroadcastReceiver phoneScreenOff = new android.content.BroadcastReceiver() {
@@ -119,8 +120,8 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        GameEnvGuard.protectWindow(this);
         DevNight.apply(this);
         getWindow().getAttributes().layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
@@ -820,20 +821,16 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             return;
         }
         if (fbPid == -1 || fbPid != Guest.pid(this) || !attached || displayOff || Guest.aod26 || Guest.saving() || closing
-                || view.getWidth() <= 0 || !view.getHolder().getSurface().isValid()) {
+                || view.getWidth() <= 0 || view.getHeight() <= 0 || Guest.fbW() <= 0 || Guest.fbH() <= 0
+                || !view.getHolder().getSurface().isValid()) {
             return;
         }
         thumbAt = up;
         // the guest's picture inside the surface (guestPoint's rectangle)
-        float vw = view.getWidth(), vh = view.getHeight(), g = (float) Guest.fbW() / Guest.fbH();
-        float w = vw, h = vh;
-        if (vw / vh > g) {
-            w = vh * g;
-        } else {
-            h = vw / g;
-        }
-        android.graphics.Rect from = new android.graphics.Rect(Math.round((vw - w) / 2), Math.round((vh - h) / 2),
-                Math.round((vw + w) / 2), Math.round((vh + h) / 2));
+        ScreenGeometry.FitBox box = ScreenGeometry.fit(view.getWidth(), view.getHeight(), Guest.fbW(), Guest.fbH());
+        float g = Math.max(0.1f, box.width / box.height);
+        android.graphics.Rect from = new android.graphics.Rect(Math.round(box.left), Math.round(box.top),
+                Math.round(box.left + box.width), Math.round(box.top + box.height));
         int tw = 300, th = Math.max(1, Math.round(300 / g));
         android.graphics.Bitmap b = android.graphics.Bitmap.createBitmap(tw, th, android.graphics.Bitmap.Config.ARGB_8888);
         java.io.File to = Guest.thumbFile(this, builtFor);    // (this screen's picture is of the guest it was built for)
@@ -906,6 +903,12 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        Choreographer.getInstance().postFrameCallback(this);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         if (rebuildForGuest()) {
@@ -921,7 +924,6 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             }
         }
         immersive();
-        Choreographer.getInstance().postFrameCallback(this);
         String log = Guest.ios26Running() ? Guest.overrides26().get("touchlog") : null;
         if ("1".equals(log) && touchLog == null) {
             try {
@@ -935,7 +937,6 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     @Override
     protected void onPause() {
         keepThumb(true);
-        Choreographer.getInstance().removeFrameCallback(this);
         liftFinger();
         Guest.releaseButtons();
         if (touchLog != null) {
@@ -946,8 +947,30 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     }
 
     @Override
+    protected void onStop() {
+        Choreographer.getInstance().removeFrameCallback(this);
+        super.onStop();
+    }
+
+    @Override
+    public void onMultiWindowModeChanged(boolean isInMultiWindowMode, android.content.res.Configuration newConfig) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
+        envGuard.logMultiWindow(this, isInMultiWindowMode, surfW, surfH);
+        immersive();
+        placeBar();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        immersive();
+        placeBar();
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean focus) {
         super.onWindowFocusChanged(focus);
+        envGuard.logWindowFocus(this, focus);
         if (focus) {
             immersive();
             showToggles();      // after Android's pin question, or its own unpin
@@ -956,6 +979,9 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
 
     @SuppressWarnings("deprecation")
     private void immersive() {
+        if (isInMultiWindowMode()) {
+            return;
+        }
         if (android.os.Build.VERSION.SDK_INT < 30) {
             // Android 10 has no WindowInsetsController: the flags it replaced, for the same full screen with
             // bars that come back on a swipe
@@ -1133,7 +1159,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             restart.setVisibility(View.GONE);
             report.setVisibility(View.GONE);
         }
-        if (fbPid == pid && attached) {
+        if (fbPid == pid && attached && surfW > 0 && surfH > 0) {
             int w = surfW, h = surfH;
             final int p = pid;
             render.post(() -> RunStats.frame(p, Render.frame(w, h)));
@@ -1147,6 +1173,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
 
     @Override
     public void surfaceCreated(SurfaceHolder h) {
+        GameEnvGuard.protectSurface(this, h.getSurface());
         render.post(() -> attached = Render.attach(h.getSurface()));
     }
 
@@ -1154,6 +1181,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     public void surfaceChanged(SurfaceHolder h, int format, int w, int hgt) {
         surfW = w;
         surfH = hgt;
+        envGuard.logSurfaceResize(this, w, hgt);
     }
 
     @Override
@@ -1204,15 +1232,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
 
     /** Where the guest screen is inside the view (aspect kept, centred). */
     private float[] guestPoint(float x, float y) {
-        float vw = view.getWidth(), vh = view.getHeight();
-        float g = (float) Guest.fbW() / Guest.fbH();
-        float w = vw, h = vh;
-        if (vw / vh > g) {
-            w = vh * g;
-        } else {
-            h = vw / g;
-        }
-        return new float[] { (x - (vw - w) / 2) / w, (y - (vh - h) / 2) / h };
+        return ScreenGeometry.touchNorm(x, y, view.getWidth(), view.getHeight(), Guest.fbW(), Guest.fbH());
     }
 
     /**
@@ -1301,6 +1321,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 }
                 break;
             case MotionEvent.ACTION_CANCEL:
+                envGuard.logTouchCancelIfBurst(this, android.os.SystemClock.uptimeMillis());
                 if (finger != -1) {
                     sendTouch(qmp, false, "cancel");
                     finger = -1;

@@ -190,7 +190,7 @@ final class CrashReport {
             }
             File tmp = new File(d, id + ".tmp"), f = new File(d, id + ".txt");
             try {
-                Files.write(tmp.toPath(), CrashText.recordLines(h, sections, MAX_BYTES), StandardCharsets.UTF_8);
+                FreezeWatchdog.writeSynced(tmp, CrashText.recordLines(h, sections, MAX_BYTES));
                 if (!tmp.renameTo(f)) {
                     throw new IOException("cannot rename " + tmp);
                 }
@@ -361,6 +361,14 @@ final class CrashReport {
                 + (r.screen == null || r.screen.isEmpty() ? "" : ", screen " + r.screen));
         LinkedHashMap<String, List<String>> s = new LinkedHashMap<>();
         s.put(CrashText.QEMU_STDERR, ev);
+        File kgslTrace = new File(run, "kgsl-trace.txt");
+        if (kgslTrace.isFile()) {
+            s.put("KGSL shim trace", tail(kgslTrace, 120));
+        }
+        File uiFreeze = new File(run, FreezeWatchdog.FILE_NAME);
+        if (uiFreeze.isFile()) {
+            s.put("UI freeze snapshot", tail(uiFreeze, 80));
+        }
         s.put(CrashText.RUN_APPLOG, app);
         String id = write(c, GUEST, String.valueOf(r.pid), endedMs, h, s, "last-crash.txt", false);
         if (id == null) {

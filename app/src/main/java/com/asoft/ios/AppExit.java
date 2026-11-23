@@ -126,7 +126,10 @@ final class AppExit {
         File tmp = new File(f.getPath() + ".tmp");
         try (FileOutputStream o = new FileOutputStream(tmp)) {
             p.store(o, "what the app was doing (AppExit)");
+            o.flush();
+            o.getFD().sync();
         } catch (IOException e) {
+            tmp.delete();
             return;
         }
         tmp.renameTo(f);
@@ -243,14 +246,21 @@ final class AppExit {
             activity = activity(now);
             logAt = logAt(now);
         }
+        List<String> javaStack = SetupRecord.stack(e);
+        boolean gaCrash = CrashText.gameAssistantKill(String.valueOf(e))
+                || CrashText.gameAssistantKill(String.join("\n", javaStack));
         String msg = e.getMessage();
-        String what = "The app crashed" + (activity == null ? "" : " while " + activity) + ": " + e.getClass().getSimpleName()
-                + (msg == null ? "" : ": " + msg);
+        String what = gaCrash
+                ? "The phone's Game Space / Game Assistant crashed inside ASoftware iOS"
+                        + (activity == null ? "" : " while " + activity)
+                : "The app crashed" + (activity == null ? "" : " while " + activity) + ": " + e.getClass().getSimpleName()
+                        + (msg == null ? "" : ": " + msg);
         LinkedHashMap<String, String> h = new LinkedHashMap<>();
         h.put("os", "0");
         h.put("guest", "The app");
         h.put("what", what.length() > 300 ? what.substring(0, 299) + "…" : what);
-        h.put("cause", String.valueOf(e));
+        h.put("cause", gaCrash ? "Game Space / Game Assistant hook crashed (" + e + "); exclude ASoftware iOS from Game Space"
+                : String.valueOf(e));
         h.put("crash", "yes");
         h.put("reason", CrashText.exitName(CrashText.EXIT_CRASH) + ", seen by the app's uncaught-exception handler");
         h.put("thread", t.getName());
@@ -259,7 +269,12 @@ final class AppExit {
         h.put("phone", CrashReport.phone());
         h.put("memory", CrashReport.memInfo());
         LinkedHashMap<String, List<String>> s = new LinkedHashMap<>();
-        s.put("java stack trace", SetupRecord.stack(e));
+        s.put("java stack trace", javaStack);
+        s.put("all threads", FreezeWatchdog.formatFreezeReport(0, e.getStackTrace(), Thread.getAllStackTraces(), null, null));
+        File uiFreeze = new File(Guest.runDir(c), FreezeWatchdog.FILE_NAME);
+        if (uiFreeze.isFile()) {
+            s.put("UI freeze snapshot", CrashReport.tail(uiFreeze, 80));
+        }
         s.put(CrashText.RUN_APPLOG, CrashReport.appLog(c, logAt, -1, 150));
         String id = CrashReport.write(c, CrashReport.APP, "crash-" + android.os.Process.myPid(), System.currentTimeMillis(), h, s,
                 "last-app-exit.txt", true);
@@ -420,6 +435,14 @@ final class AppExit {
             File run = Guest.runDir(c);
             s.put("the guest's QEMU stderr", CrashReport.stderrEvidence(new File(run, "qemu-stderr.txt")));
             s.put("the guest's console (serial.txt)", CrashReport.tail(new File(run, "serial.txt"), 100));
+            File kgslTrace = new File(run, "kgsl-trace.txt");
+            if (kgslTrace.isFile()) {
+                s.put("KGSL shim trace", CrashReport.tail(kgslTrace, 120));
+            }
+        }
+        File uiFreeze = new File(Guest.runDir(c), FreezeWatchdog.FILE_NAME);
+        if (uiFreeze.isFile()) {
+            s.put("UI freeze snapshot", CrashReport.tail(uiFreeze, 80));
         }
         long logAt = old == null ? -1 : logAt(old);
         s.put("app log of that run", CrashReport.appLog(c, logAt, logEnd, 150));

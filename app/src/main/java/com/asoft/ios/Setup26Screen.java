@@ -174,11 +174,16 @@ final class Setup26Screen {
         said.remove(group);
         boolean inRun = SetupState.plan26(a, group, false) != null;
         if (s.running && mine() && inRun) {
+            if (s.pausing || s.pauseAfterStep) {
+                return;
+            }
             if (s.paused) {
+                s.paused = false;
                 SetupService.startA26(a);
             } else {
                 SetupService.pause(a);
             }
+            update();
             return;
         }
         if (s.running) {
@@ -366,11 +371,12 @@ final class Setup26Screen {
         SetupSection.say(sec.error, said.getOrDefault(group, ""), RED);
 
         boolean other = s.running && !inRun;
-        primary.setText(installed ? "" : inRun ? (s.paused ? "Resume" : "Pause") : !pass ? "Check the GPU" : pending ? "Resume" : "Set up");
-        boolean noButton = installed || !inRun && failed || inRun && !s.paused && !SetupService.pausable(s.step);
-        primary.setVisibility(noButton ? View.GONE : View.VISIBLE);
-        primary.setEnabled(!GpuCheck.running && !other);
-        primary.setAlpha(GpuCheck.running || other ? 0.4f : 1f);
+        PauseUi.ButtonState b = PauseUi.setup26Button(installed, inRun, s.paused, s.pausing, s.pauseAfterStep,
+                SetupService.pausable(s.step), other, GpuCheck.running, failed, pass, pending);
+        primary.setText(b.label);
+        primary.setVisibility(b.visible ? View.VISIBLE : View.GONE);
+        primary.setEnabled(b.enabled);
+        primary.setAlpha(b.alpha);
         sec.follow(inRun);
         // both at once: only for a new run, and only while the other one is not there
         CheckBox also = watch ? alsoIos26 : alsoWatch;
@@ -405,8 +411,12 @@ final class Setup26Screen {
                 gb(Math.max(0, PhoneSetup26.startFree - PhoneSetup26.lowestFree))) : "";
         SetupSection.say(run.info, String.format(Locale.ROOT, "%s free on this phone%s%s", gb(fr),
                 need > 0 && running ? "; the next step needs about " + gb(need) : "", peak), fr < need ? ORANGE : Ui.DIM);
-        run.setState(running ? SetupSection.WORKING : SetupSection.OFF,
-                running ? (s.text.isEmpty() ? "Working" : s.text) : s.paused ? "Paused" : "Stopped");
+        String runLabel = !running ? (s.paused ? "Paused" : "Stopped")
+                : s.paused ? "Paused"
+                : s.pauseAfterStep ? "Pausing after step\u2026"
+                : s.pausing ? "Pausing\u2026"
+                : (s.text.isEmpty() ? "Working" : s.text);
+        run.setState(running && !s.paused ? SetupSection.WORKING : SetupSection.OFF, runLabel);
 
         List<IpswFetch.Item> items = running ? s.items : java.util.Collections.emptyList();
         long got = 0, size = 0;
