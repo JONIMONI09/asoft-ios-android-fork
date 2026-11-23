@@ -13,10 +13,8 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout feat/ux-stability-pack (d89fa07)
+      - name: Checkout work-ci-branch
         uses: actions/checkout@v4
-        with:
-          ref: feat/ux-stability-pack
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
