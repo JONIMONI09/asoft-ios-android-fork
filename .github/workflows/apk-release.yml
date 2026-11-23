@@ -64,7 +64,27 @@ jobs:
 
       - name: Run unit tests & build signed debug APK
         run: |
-          bash ./gradlew testDebugUnitTest assembleDebug -Dorg.gradle.java.home="$JAVA_HOME" --no-daemon --console=plain
+          cat > /tmp/mirror.init.gradle <<'EOF'
+          settingsEvaluated { settings ->
+              settings.pluginManagement.repositories {
+                  maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+              }
+              settings.dependencyResolutionManagement.repositories {
+                  maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+              }
+          }
+          allprojects {
+              buildscript {
+                  repositories {
+                      maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+                  }
+              }
+              repositories {
+                  maven { url = 'https://maven-central.storage-download.googleapis.com/maven2/' }
+              }
+          }
+          EOF
+          bash ./gradlew -I /tmp/mirror.init.gradle testDebugUnitTest assembleDebug -Dorg.gradle.java.home="$JAVA_HOME" --no-daemon --console=plain --max-workers=2
           cp app/build/outputs/apk/debug/app-debug.apk ASoftware-iOS-Android-0.1.7-issue92-debug.apk
 
       - name: Upload workflow APK artifact
@@ -79,8 +99,8 @@ jobs:
         run: |
           gh release delete v0.1.7-issue92-test --yes --cleanup-tag || true
           gh release create v0.1.7-issue92-test \
-            --target "${{ github.sha }}" \
+            --target "a33a8c5591cba0c7fd9d76d80cfdc342aaea9c09" \
             --prerelease \
             --title "0.1.7 Issue #92 Test APK (SM8650 KGSL Shim + O_SYNC Logs)" \
-            --notes "Signed debug APK built from main (`a33a8c5`) with NDK 29 + CMake 3.22.1. Ready for sideload install on REDMAGIC Nova (SM8650). Uninstall upstream 0.1.7 release first if signatures differ." \
+            --notes "Signed debug APK built from main (a33a8c5) with NDK 29 + CMake 3.22.1. Ready for sideload install on REDMAGIC Nova (SM8650). Uninstall upstream 0.1.7 release first if signatures differ." \
             ASoftware-iOS-Android-0.1.7-issue92-debug.apk
