@@ -717,8 +717,8 @@ public class MainActivity extends Activity {
                             }
                         }));
                 runOnUiThread(() -> {
-                    progress.dismiss();
-                    if (isFinishing()) {
+                    safeDismiss(progress);
+                    if (isFinishing() || isDestroyed()) {
                         return;
                     }
                     AlertDialog.Builder b = new AlertDialog.Builder(this)
@@ -733,8 +733,8 @@ public class MainActivity extends Activity {
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
-                    progress.dismiss();
-                    if (!isFinishing()) {
+                    safeDismiss(progress);
+                    if (!isFinishing() && !isDestroyed()) {
                         new AlertDialog.Builder(this)
                                 .setTitle("Update failed")
                                 .setMessage(String.valueOf(e.getMessage()))
@@ -744,6 +744,19 @@ public class MainActivity extends Activity {
                 });
             }
         }, "apk-updater").start();
+    }
+
+    private void safeDismiss(AlertDialog d) {
+        if (d == null || isFinishing() || isDestroyed()) {
+            return;
+        }
+        try {
+            if (d.isShowing()) {
+                d.dismiss();
+            }
+        } catch (IllegalArgumentException ignored) {
+            // window already detached
+        }
     }
 
     private void showPowerWarning() {
