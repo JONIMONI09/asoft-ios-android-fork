@@ -38,6 +38,7 @@ import java.util.regex.Pattern;
  */
 final class UpdateCheck {
     static final String RELEASE_PAGE = "https://github.com/alpersamur3/asoft-ios-android/releases/latest";
+    static final String FORK_RELEASE_PAGE = "https://github.com/JONIMONI09/asoft-ios-android-fork/releases";
     // the list, not /releases/latest: the notice's color is the highest level among every release
     // this app has not got yet, so someone two releases behind still sees a critical one in between
     private static final String API = "https://api.github.com/repos/alpersamur3/asoft-ios-android/releases?per_page=10";
@@ -81,6 +82,19 @@ final class UpdateCheck {
     static void setEnabled(Context c, boolean on) {
         prefs(c).edit().putBoolean("check", on).apply();
         lastAsked = 0;
+    }
+
+    static boolean useForkChannel(Context c) {
+        return prefs(c).getBoolean("fork_channel", false);
+    }
+
+    static void setUseForkChannel(Context c, boolean fork) {
+        prefs(c).edit().putBoolean("fork_channel", fork).apply();
+        lastAsked = 0;
+    }
+
+    static String releasePage(Context c) {
+        return useForkChannel(c) ? FORK_RELEASE_PAGE : RELEASE_PAGE;
     }
 
     private static boolean debug(Context c) {
