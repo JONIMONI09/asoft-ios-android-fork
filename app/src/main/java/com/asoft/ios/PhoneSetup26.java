@@ -1221,19 +1221,26 @@ final class PhoneSetup26 {
         startCool(c, boot26(c, "root26g.qcow2", "cloud/kernelcache.research.vphone600.decompressed", "dtree-phone", "root26.tc"), p, "ios26:firstboot", cancelled);
         GuestConsole con = new GuestConsole(Guest.consoleSocket(c));
         long t0 = System.currentTimeMillis();
+        boolean capturedSilentDiag = false;
         try {
             while (true) {
                 if (cancelled.getAsBoolean()) {
                     throw new IOException("stopped");
                 }
                 mustRun(c, "iOS's first boot");
-                long min = (System.currentTimeMillis() - t0) / 60_000;
+                long elapsedSec = (System.currentTimeMillis() - t0) / 1000;
+                long min = elapsedSec / 60;
+                if (!capturedSilentDiag && min >= 4 && new File(Guest.runDir(c), "serial.txt").length() == 0) {
+                    capturedSilentDiag = true;
+                    BootDiagnostics.capture(c, "serial.txt still 0 bytes after 4 min (firstboot)", elapsedSec, true);
+                }
                 p.step("ios26:firstboot", (int) Math.min(95, min * 100 / 30), "iOS is booting for the first time (" + min + " min; on a PC about 10)");
                 if (con.says("test -e /private/var/keybags/persona.kb && test -e /private/var/keybags/usersession.kb && echo __READY__ || echo __WAIT__",
                         "__READY__", 90_000)) {
                     break;
                 }
                 if (min > 60) {
+                    BootDiagnostics.capture(c, "firstboot 60 min timeout (no persona files)", elapsedSec, true);
                     throw new IOException("iOS wrote no persona files in 60 min (" + Guest.stopReason(c) + ")");
                 }
                 sleep(30_000);
