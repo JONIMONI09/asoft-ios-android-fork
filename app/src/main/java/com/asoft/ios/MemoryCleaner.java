@@ -32,9 +32,9 @@ final class MemoryCleaner {
 
     private MemoryCleaner() {}
 
-    /** Without a pairing (WirelessAdb) only up to Android 13. */
+    /** Without a pairing (WirelessAdb) or Shizuku only up to Android 13. */
     static boolean supported(Context c) {
-        return Build.VERSION.SDK_INT < 34 || WirelessAdb.paired(c);
+        return Build.VERSION.SDK_INT < 34 || WirelessAdb.paired(c) || ShizukuBridge.granted();
     }
 
     static boolean enabled(Context c) {
@@ -189,6 +189,8 @@ final class MemoryCleaner {
         long before = Helper.available(c) >> 20;
         if (WirelessAdb.paired(c)) {
             WirelessAdb.shell(c, "am kill-all", timeoutMs);
+        } else if (ShizukuBridge.granted()) {
+            ShizukuBridge.shell("am kill-all", timeoutMs);
         } else {
             for (String p : others(c)) {
                 try {
@@ -215,13 +217,15 @@ final class MemoryCleaner {
     /** What the memory sheet shows, from one "dumpsys meminfo"; without the pairing, only why there is none. */
     static Info info(Context c, int n, int timeoutMs) {
         Info i = new Info();
-        if (!WirelessAdb.paired(c)) {
-            i.top = "Wireless debugging is not paired: the apps cannot be listed (the kill still ends this app's "
+        if (!WirelessAdb.paired(c) && !ShizukuBridge.granted()) {
+            i.top = "Wireless debugging is not paired (and Shizuku is not granted): the apps cannot be listed (the kill still ends this app's "
                     + "background processes on Android 13 and older).";
             return i;
         }
         try {
-            String d = WirelessAdb.shell(c, "dumpsys meminfo", timeoutMs);
+            String d = WirelessAdb.paired(c)
+                    ? WirelessAdb.shell(c, "dumpsys meminfo", timeoutMs)
+                    : ShizukuBridge.shell("dumpsys meminfo", timeoutMs);
             i.top = topLines(d, n);
             i.summary = summaryLines(d);
             return i;
@@ -323,19 +327,24 @@ final class MemoryCleaner {
     private static void round(Context c, String what, int adbTimeoutMs) {
         ActivityManager am = c.getSystemService(ActivityManager.class);
         long before = availableMb(am);
-        if (WirelessAdb.paired(c)) {
+        if (WirelessAdb.paired(c) || ShizukuBridge.granted()) {
+            boolean useWadb = WirelessAdb.paired(c);
             try {
-                WirelessAdb.shell(c, "am kill-all", adbTimeoutMs);
+                if (useWadb) {
+                    WirelessAdb.shell(c, "am kill-all", adbTimeoutMs);
+                } else {
+                    ShizukuBridge.shell("am kill-all", adbTimeoutMs);
+                }
                 sleep(1500);
                 adbSaid = null;
-                AppLog.note(c, what + ": am kill-all through wireless adb, available " + before + " -> "
-                        + availableMb(am) + " MB");
+                AppLog.note(c, what + ": am kill-all through " + (useWadb ? "wireless adb" : "Shizuku")
+                        + ", available " + before + " -> " + availableMb(am) + " MB");
                 return;
             } catch (java.io.IOException e) {
                 String why = String.valueOf(e.getMessage());
                 if (!why.equals(adbSaid)) {
                     adbSaid = why;
-                    AppLog.note(c, what + ": wireless adb: " + why);
+                    AppLog.note(c, what + ": " + (useWadb ? "wireless adb: " : "Shizuku: ") + why);
                 }
                 if (Build.VERSION.SDK_INT >= 34) {
                     return;     // nothing else an app may do here
