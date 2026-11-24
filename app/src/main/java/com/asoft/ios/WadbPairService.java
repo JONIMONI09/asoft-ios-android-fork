@@ -112,13 +112,7 @@ public class WadbPairService extends Service {
     }
 
     private void show(String text, boolean ask) {
-        if (foregrounded && text.equals(lastShownText) && ask == lastShownAsk) {
-            return;
-        }
         state = text;
-        lastShownText = text;
-        lastShownAsk = ask;
-        foregrounded = true;
         startForeground(ID, notification(text, ask, true), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
 
