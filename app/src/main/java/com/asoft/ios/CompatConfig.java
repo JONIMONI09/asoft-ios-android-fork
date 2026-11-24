@@ -68,7 +68,11 @@ final class CompatConfig {
             return c;
         }
 
-        /** Recommended preset for known Issue #92 Snapdragon/KGSL GPUs when user accepts the GPU check prompt. */
+        /**
+         * Setup-safe recommended preset for known Issue #92 Snapdragon/KGSL GPUs.
+         * Keeps lazySurfacesOff = false so reims keeps lazy IOSurface reparking enabled and stays
+         * under Android's 65,530 vm.max_map_count limit during iOS 26 DataMigration.
+         */
         static Config recommendedForKnownKgslBug() {
             Config c = new Config();
             c.kgslTrace = true;
@@ -77,8 +81,13 @@ final class CompatConfig {
             c.kgslCacheSync = true;
             c.featureGuard = true;
             c.submitThrottle = true;
-            c.lazySurfacesOff = true;
+            c.lazySurfacesOff = false;
             return c;
+        }
+
+        /** Intelligently selects the setup-safe preset based on GPU check results. */
+        static Config recommendedForGpu(boolean pass, boolean nosparse, boolean systemDriver) {
+            return (pass && nosparse && !systemDriver) ? recommendedForKnownKgslBug() : safeDefaults();
         }
 
         Config copy() {

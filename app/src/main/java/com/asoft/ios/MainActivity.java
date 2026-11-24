@@ -69,7 +69,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout box;
     private final Panel p26 = new Panel(Guest.IOS26), p16 = new Panel(Guest.IOS16), pWatch = new Panel(Guest.WATCH);
-    private TextView hint, powerWarn, freeRamValue, setupScreenValue, wadbValue, compat26Value, updateValue, logsValue, footer, engineLog;
+    private TextView hint, powerWarn, adbWarn, freeRamValue, setupScreenValue, wadbValue, compat26Value, updateValue, logsValue, footer, engineLog;
     private LinearLayout updateBar, gameSpaceBar, advanced;
     private TextView updateText, updateNote, updateGet, updateDismiss, gameSpaceText;
     private File pendingInstallApk;
@@ -414,6 +414,19 @@ public class MainActivity extends Activity {
         wlp.bottomMargin = dp(12);
         box.addView(powerWarn, wlp);
         powerWarn.setVisibility(View.GONE);
+        adbWarn = banner(0xff142030, 0xff5a9bff);
+        adbWarn.setOnClickListener(v -> {
+            if (ShizukuBridge.available() && !ShizukuBridge.granted()) {
+                WadbPairService.stop(this);
+                ShizukuBridge.requestPermission();
+            } else {
+                wirelessDebugging();
+            }
+        });
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(-1, -2);
+        alp.bottomMargin = dp(12);
+        box.addView(adbWarn, alp);
+        adbWarn.setVisibility(View.GONE);
         addGameSpaceBanner();
 
         box.addView(buildPanel(p26, "iOS 26", DeviceView.ISLAND, new int[] {0xff5a9bff, 0xff4a5df0, 0xff5b36cf}),
@@ -1702,6 +1715,27 @@ public class MainActivity extends Activity {
                 : !WirelessAdb.paired(this) ? "Not paired"
                 : WirelessAdb.refused(this) ? "Pair again" : WirelessAdb.connected() ? "Connected"
                 : WirelessAdb.switchedOn(this) == 0 ? "Paired, off now" : "Paired");
+        showAdbBanner();
+    }
+
+    private void showAdbBanner() {
+        if (adbWarn == null) {
+            return;
+        }
+        if (!WirelessAdb.supported() || ShizukuBridge.granted() || WirelessAdb.connected()) {
+            adbWarn.setVisibility(View.GONE);
+            return;
+        }
+        boolean shizukuRunning = ShizukuBridge.available();
+        boolean ramOn = MemoryCleaner.enabled(this);
+        if (!shizukuRunning && !ramOn) {
+            adbWarn.setVisibility(View.GONE);
+            return;
+        }
+        adbWarn.setText(shizukuRunning
+                ? "Shizuku is running — tap here to grant permission for Free memory for iOS."
+                : "Shizuku / Wireless debugging is disconnected — tap here to reconnect for Free memory for iOS.");
+        adbWarn.setVisibility(View.VISIBLE);
     }
 
     private void showCompat26Dialog() {
@@ -1744,12 +1778,16 @@ public class MainActivity extends Activity {
         titleTxt.setTypeface(Typeface.DEFAULT_BOLD);
         titleTxt.setTextColor(TEXT);
         titleRow.addView(titleTxt, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView autoBtn = Ui.link(this, "Auto for GPU", Ui.LINK, null);
+        autoBtn.setTextSize(14);
+        autoBtn.setPadding(0, 0, dp(10), 0);
+        titleRow.addView(autoBtn);
         TextView helpBtn = Ui.link(this, " ? ", Ui.LINK, v -> showCompat26HelpDialog());
         helpBtn.setTextSize(18);
         helpBtn.setTypeface(Typeface.DEFAULT_BOLD);
         titleRow.addView(helpBtn);
 
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setCustomTitle(titleRow)
                 .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> {
                     checked[which] = isChecked;
@@ -1782,6 +1820,20 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+        autoBtn.setOnClickListener(v -> {
+            GpuCheck.Result r = GpuCheck.dir(this).isDirectory() ? GpuCheck.last(this) : null;
+            boolean sys = GpuCheck.systemDriver(this);
+            boolean compat = r != null && r.pass && r.nosparse && !sys;
+            CompatConfig.Config auto = CompatConfig.Config.recommendedForGpu(r != null && r.pass, r != null && r.nosparse, sys);
+            CompatConfig.save(this, auto);
+            CompatConfig.markGpuPromptHandled(this);
+            dialog.dismiss();
+            showSettings();
+            String gpuName = (r != null && r.driver != null && !r.driver.isEmpty()) ? r.driver : "this GPU";
+            Toast.makeText(this, compat
+                    ? "Auto-selected setup-safe Snapdragon preset for " + gpuName + " (lazy IOSurface reparking kept ON)"
+                    : "Auto-selected stock defaults (all off) for " + gpuName, Toast.LENGTH_LONG).show();
+        });
     }
 
     private void showCompat26OptionInfo(AlertDialog parent, String title, int which, boolean[] checked) {
@@ -1831,9 +1883,9 @@ public class MainActivity extends Activity {
                         + "When to enable it: Your GPU driver hangs or reboots under bursty parallel submits.\n\n"
                         + "When to leave it OFF: iOS 26 boot stalls or feels sluggish, or your device does not crash on submits.";
             case 7:
-                return "What it does: Switches IOSurface reparking to list mode (REIMS_VGPU_LAZY_MAPPINGS=lists).\n\n"
-                        + "When to enable it: You hit IOSurface mapping crashes or freezes during iOS 26 UI rendering.\n\n"
-                        + "When to leave it OFF: Normal use when iOS 26 renders without IOSurface errors.";
+                return "What it does: Disables lazy IOSurface reparking (REIMS_VGPU_LAZY_MAPPINGS=lists) and maps guest surface pages eagerly.\n\n"
+                        + "When to enable it: Only if your driver refuses lazy IOSurface imports during UI rendering.\n\n"
+                        + "When to leave it OFF: ALWAYS leave this OFF during iOS 26 setup / DataMigration and normal use — turning it ON can exhaust Android's 65,530 memory mapping limit (vm.max_map_count) and stop QEMU.";
             case 8:
                 return "What it does: Forces shadow-buffer bouncing for ALL host-pointer imports, even simple 1-VMA buffers.\n\n"
                         + "When to enable it: Only when diagnosing stubborn KGSL crashes that Multi-VMA bounce did not stop.\n\n"
@@ -1969,27 +2021,37 @@ public class MainActivity extends Activity {
             return;
         }
         if (WirelessAdb.paired(this) && !WirelessAdb.refused(this)) {
-            new AlertDialog.Builder(this)
+            boolean shizukuRunning = ShizukuBridge.available();
+            AlertDialog.Builder b = new AlertDialog.Builder(this)
                     .setTitle("Wireless debugging")
                     .setMessage(WirelessAdb.status(this) + ".\n\nWhile iOS runs, the app asks Android through it to end the "
                             + "background processes of other apps (Free memory while iOS runs).\n\nAfter a restart of the phone "
-                            + "Wireless debugging is off until you turn it on again (Developer options, on Wi-Fi); the pairing stays.")
-                    .setPositiveButton("Test now", (d, w) -> testWirelessAdb())
-                    .setNeutralButton("Unpair", (d, w) -> new Thread(() -> {
-                        // closing the adb connection writes to its TLS socket: never on the main thread (A#110,
-                        // NetworkOnMainThreadException from AdbConnection.close)
-                        WirelessAdb.unpair(this);
-                        runOnUiThread(() -> {
-                            if (isFinishing()) {
-                                return;
-                            }
-                            showSettings();
-                            Toast.makeText(this, "Unpaired. Settings still lists the key under Wireless debugging > Paired devices: "
-                                    + "remove it there too.", Toast.LENGTH_LONG).show();
-                        });
-                    }, "wadb-unpair").start())
-                    .setNegativeButton("Close", null)
-                    .show();
+                            + "Wireless debugging is off until you turn it on again (Developer options, on Wi-Fi); the pairing stays."
+                            + (shizukuRunning ? "\n\nShizuku is currently running — you can switch to Shizuku with one tap." : "\n\nTip: You can also start the Shizuku app and use it instead of Wireless debugging."))
+                    .setNegativeButton("Close", null);
+            if (shizukuRunning) {
+                b.setPositiveButton("Use Shizuku", (d, w) -> {
+                    WadbPairService.stop(this);
+                    ShizukuBridge.requestPermission();
+                });
+                b.setNeutralButton("Test now", (d, w) -> testWirelessAdb());
+            } else {
+                b.setPositiveButton("Test now", (d, w) -> testWirelessAdb());
+                b.setNeutralButton("Unpair", (d, w) -> new Thread(() -> {
+                    // closing the adb connection writes to its TLS socket: never on the main thread (A#110,
+                    // NetworkOnMainThreadException from AdbConnection.close)
+                    WirelessAdb.unpair(this);
+                    runOnUiThread(() -> {
+                        if (isFinishing()) {
+                            return;
+                        }
+                        showSettings();
+                        Toast.makeText(this, "Unpaired. Settings still lists the key under Wireless debugging > Paired devices: "
+                                + "remove it there too.", Toast.LENGTH_LONG).show();
+                    });
+                }, "wadb-unpair").start());
+            }
+            b.show();
             return;
         }
         new AlertDialog.Builder(this)

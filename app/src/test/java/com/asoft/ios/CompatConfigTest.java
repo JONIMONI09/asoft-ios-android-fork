@@ -81,13 +81,26 @@ public class CompatConfigTest {
         assertEquals("1", env.get("ASOFT_SHIM_CACHE_SYNC"));
         assertEquals("1", env.get("ASOFT_SHIM_FEATURE_GUARD"));
         assertEquals("1", env.get("ASOFT_SHIM_SUBMIT_THROTTLE"));
-        assertEquals(ImportMode.LISTS, env.get(ImportMode.LAZY_MAPPINGS));
+        assertFalse(env.containsKey(ImportMode.LAZY_MAPPINGS));
         assertEquals(new File(LINKS_DIR, "libvulkan_freedreno.so").getPath(), env.get("ASOFT_REAL_TURNIP_PATH"));
         assertEquals(new File(NATIVE_DIR, CompatConfig.SHIM_LIB).getPath(), env.get("LD_PRELOAD"));
         assertFalse(env.containsKey("ASOFT_SHIM_ALL_HOST_BOUNCE"));
         assertFalse(env.containsKey("TU_KGSL_IMPORT_THREAD"));
         assertFalse(env.containsKey("TU_DEBUG"));
         assertFalse(env.containsKey("METAL2VULKAN_LOG_MEMORY"));
+    }
+
+    @Test
+    public void recommendedForGpuSelectsSafelyByDriver() {
+        CompatConfig.Config snapdragon = CompatConfig.Config.recommendedForGpu(true, true, false);
+        assertTrue(snapdragon.multiVmaBounce);
+        assertFalse(snapdragon.lazySurfacesOff);
+
+        CompatConfig.Config systemDriver = CompatConfig.Config.recommendedForGpu(true, true, true);
+        assertFalse(systemDriver.multiVmaBounce);
+
+        CompatConfig.Config fullSparse = CompatConfig.Config.recommendedForGpu(true, false, false);
+        assertFalse(fullSparse.multiVmaBounce);
     }
 
     @Test
