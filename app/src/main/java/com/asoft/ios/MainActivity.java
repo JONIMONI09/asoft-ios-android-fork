@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
     private TextView hint, powerWarn, freeRamValue, setupScreenValue, wadbValue, compat26Value, updateValue, logsValue, footer, engineLog;
     private LinearLayout updateBar, gameSpaceBar, advanced;
     private TextView updateText, updateNote, updateGet, updateDismiss, gameSpaceText;
+    private File pendingInstallApk;
     private String gameSpacePkg;
     /**
      * The clock check again every 10 s while this screen shows: at onResume the phone has just
@@ -504,6 +505,11 @@ public class MainActivity extends Activity {
         showUpdate();
         showGameSpaceBanner();
         UpdateCheck.check(this, this::showUpdate);
+        if (pendingInstallApk != null && pendingInstallApk.isFile() && getPackageManager().canRequestPackageInstalls()) {
+            File apk = pendingInstallApk;
+            pendingInstallApk = null;
+            ApkUpdater.launchInstaller(this, apk);
+        }
         powerWarn.postDelayed(powerRecheck, 3_000);
         try {
             rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuPermListener);
@@ -620,6 +626,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = dp(12);
         box.addView(updateBar, lp);
+        updateBar.setOnClickListener(v -> startVerifiedApkUpdate());
         updateBar.setVisibility(View.GONE);
     }
 
@@ -693,24 +700,70 @@ public class MainActivity extends Activity {
     }
 
     private void startVerifiedApkUpdate() {
+        if (SetupService.busy() || Guest.running()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Update paused")
+                    .setMessage("Setup or iOS is currently running. Finish or stop it first, then run the update.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
         boolean fork = UpdateCheck.useForkChannel(this);
         AlertDialog progress = new AlertDialog.Builder(this)
-                .setTitle("Checking latest release")
-                .setMessage("Contacting GitHub (" + (fork ? "Fork CI" : "Upstream") + ")…")
+                .setTitle("Connecting to GitHub")
+                .setMessage("Checking latest release (" + (fork ? "Fork CI" : "Upstream") + ")…")
                 .setCancelable(false)
                 .show();
         new Thread(() -> {
             try {
                 ApkUpdater.ReleaseAsset asset = ApkUpdater.fetchLatest(this, fork);
+                long freeBytes = getFilesDir().getUsableSpace();
+                String dlMb = asset.sizeBytes > 0 ? String.format(java.util.Locale.US, "%.1f MB", asset.sizeBytes / (1024.0 * 1024.0)) : "unknown size";
+                String freeStr = freeBytes >= (1L << 30)
+                        ? String.format(java.util.Locale.US, "%.1f GB", freeBytes / (double) (1L << 30))
+                        : (freeBytes >> 20) + " MB";
                 runOnUiThread(() -> {
-                    if (!isFinishing()) {
-                        progress.setTitle("Downloading " + asset.tag);
-                        progress.setMessage("Downloading " + asset.assetName + "…");
+                    safeDismiss(progress);
+                    if (isFinishing() || isDestroyed()) {
+                        return;
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle("Download " + asset.tag + "?")
+                            .setMessage("APK file: " + asset.assetName
+                                    + "\nDownload size: " + dlMb
+                                    + "\nFree device storage: " + freeStr
+                                    + "\n\nThe APK will be verified (ZIP structure, package name, signing key, and SHA-256) before installing.")
+                            .setPositiveButton("Download", (d, w) -> beginVerifiedApkDownload(asset))
+                            .setNegativeButton("Cancel", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    safeDismiss(progress);
+                    if (!isFinishing() && !isDestroyed()) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Connection failed")
+                                .setMessage(String.valueOf(e.getMessage()))
+                                .setPositiveButton("Retry", (d, w) -> startVerifiedApkUpdate())
+                                .setNegativeButton("Cancel", null)
+                                .show();
                     }
                 });
+            }
+        }, "apk-updater-check").start();
+    }
+
+    private void beginVerifiedApkDownload(ApkUpdater.ReleaseAsset asset) {
+        AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("Downloading " + asset.tag)
+                .setMessage("Downloading " + asset.assetName + "…")
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            try {
                 ApkUpdater.VerifyResult res = ApkUpdater.downloadAndVerify(this, asset, (done, total) ->
                         runOnUiThread(() -> {
-                            if (!isFinishing()) {
+                            if (!isFinishing() && !isDestroyed()) {
                                 String pct = total > 0 ? (done * 100 / total) + "% (" + (done >> 20) + " / " + (total >> 20) + " MB)"
                                         : (done >> 20) + " MB";
                                 progress.setMessage("Downloading " + asset.assetName + "\n" + pct);
@@ -727,7 +780,7 @@ public class MainActivity extends Activity {
                             .setNegativeButton("Cancel", null);
                     if (res.error == null) {
                         String btn = res.signatureMatch ? "Install update" : "Open installer anyway";
-                        b.setPositiveButton(btn, (d2, w2) -> ApkUpdater.launchInstaller(this, res.apkFile));
+                        b.setPositiveButton(btn, (d2, w2) -> installOrRequestPermission(res.apkFile));
                     }
                     b.show();
                 });
@@ -738,12 +791,34 @@ public class MainActivity extends Activity {
                         new AlertDialog.Builder(this)
                                 .setTitle("Update failed")
                                 .setMessage(String.valueOf(e.getMessage()))
-                                .setPositiveButton("OK", null)
+                                .setPositiveButton("Retry", (d, w) -> beginVerifiedApkDownload(asset))
+                                .setNegativeButton("Cancel", null)
                                 .show();
                     }
                 });
             }
         }, "apk-updater").start();
+    }
+
+    private void installOrRequestPermission(File apkFile) {
+        if (apkFile == null || !apkFile.isFile()) {
+            return;
+        }
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            pendingInstallApk = apkFile;
+            new AlertDialog.Builder(this)
+                    .setTitle("Install permission needed")
+                    .setMessage("Your verified APK is saved and ready. Grant \"Install unknown apps\" for ASoftware, then return to this app to continue installation automatically.")
+                    .setPositiveButton("Open Settings", (d, w) -> {
+                        Intent i = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                android.net.Uri.parse("package:" + getPackageName()));
+                        startActivity(i);
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return;
+        }
+        ApkUpdater.launchInstaller(this, apkFile);
     }
 
     private void safeDismiss(AlertDialog d) {

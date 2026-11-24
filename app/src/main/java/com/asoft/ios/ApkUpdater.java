@@ -182,9 +182,38 @@ final class ApkUpdater {
         return actual != null && expected != null && actual.equalsIgnoreCase(expected.trim());
     }
 
+    static boolean isTransientNetworkError(Throwable t) {
+        while (t != null) {
+            if (t instanceof java.net.UnknownHostException
+                    || t instanceof java.net.SocketTimeoutException
+                    || t instanceof java.net.ConnectException) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
     static ReleaseAsset fetchLatest(Context c, boolean forkChannel) throws Exception {
         String api = forkChannel ? FORK_API : UPSTREAM_API;
-        String json = UpdateCheck.get(api, "application/vnd.github+json", UpdateCheck.version(c), 1 << 20);
+        String ver = UpdateCheck.version(c);
+        String json = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                json = UpdateCheck.get(api, "application/vnd.github+json", ver, 1 << 20);
+                break;
+            } catch (IOException e) {
+                if (attempt == 1 || !isTransientNetworkError(e)) {
+                    throw e;
+                }
+                try {
+                    Thread.sleep(1500);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
         ReleaseAsset asset = parseLatestApk(json, forkChannel);
         if (asset == null) {
             throw new IOException("No APK asset found in latest release.");
