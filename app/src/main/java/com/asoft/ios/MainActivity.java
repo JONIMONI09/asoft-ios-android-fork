@@ -508,10 +508,32 @@ public class MainActivity extends Activity {
         showGameSpaceBanner();
         UpdateCheck.check(this, this::showUpdate);
         powerWarn.postDelayed(powerRecheck, 3_000);
+        try {
+            rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuPermListener);
+        } catch (Throwable ignored) {
+            // Shizuku unavailable
+        }
     }
+
+    private final rikka.shizuku.Shizuku.OnRequestPermissionResultListener shizukuPermListener = (req, res) -> {
+        if (req == ShizukuBridge.REQ_PERMISSION && res == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            MemoryCleaner.setEnabled(this, true);
+            runOnUiThread(() -> {
+                if (!isFinishing()) {
+                    showSettings();
+                    Toast.makeText(this, "Shizuku granted. Free memory while iOS runs is now active.", Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+    };
 
     @Override
     protected void onPause() {
+        try {
+            rikka.shizuku.Shizuku.removeRequestPermissionResultListener(shizukuPermListener);
+        } catch (Throwable ignored) {
+            // Shizuku unavailable
+        }
         unregisterReceiver(powerChanged);
         powerWarn.removeCallbacks(powerRecheck);
         footer.removeCallbacks(follow);
@@ -1489,7 +1511,8 @@ public class MainActivity extends Activity {
         int records = CrashReport.files(this).size();
         logsValue.setText(records == 0 ? "" : records == 1 ? "1 record" : records + " records");
         String pairing = WadbPairService.state;
-        wadbValue.setText(pairing != null ? "Pairing…" : !WirelessAdb.paired(this) ? "Not paired"
+        wadbValue.setText(pairing != null ? "Pairing…"
+                : !WirelessAdb.paired(this) ? (ShizukuBridge.granted() ? "Shizuku" : "Not paired")
                 : WirelessAdb.refused(this) ? "Pair again" : WirelessAdb.connected() ? "Connected"
                 : WirelessAdb.switchedOn(this) == 0 ? "Paired, off now" : "Paired");
     }
@@ -1681,17 +1704,48 @@ public class MainActivity extends Activity {
                     .show();
             return;
         }
+        if (ShizukuBridge.granted()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Connected via Shizuku")
+                    .setMessage("ASoftware iOS has Shizuku permission and uses it directly to free background memory "
+                            + "while iOS runs — no Wireless debugging pairing code needed.")
+                    .setPositiveButton("Test now", (d, w) -> new Thread(() -> {
+                        String msg;
+                        try {
+                            String out = ShizukuBridge.shell("id -u", 5_000).trim();
+                            msg = "2000".equals(out) || "0".equals(out)
+                                    ? "Shizuku works (uid " + out + ")."
+                                    : "Shizuku replied: " + out;
+                        } catch (Exception e) {
+                            msg = "Shizuku test failed: " + e.getMessage();
+                        }
+                        String say = msg;
+                        runOnUiThread(() -> {
+                            if (!isFinishing()) {
+                                Toast.makeText(this, say, Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }, "shizuku-test").start())
+                    .setNeutralButton("Pair Wireless ADB instead", (d, w) -> startPairing())
+                    .setNegativeButton("Close", null)
+                    .show();
+            return;
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Pair with Wireless debugging")
                 .setMessage("Android 14 and later let an app end only its own background processes. Paired with this phone's "
-                        + "Wireless debugging, the app can ask Android to end those of your other apps while iOS runs, so "
-                        + "Android does not close iOS for lack of memory.\n\n"
-                        + "1. Tap Pair: Developer options open.\n"
-                        + "2. Wireless debugging (needs Wi-Fi): on, then \"Pair device with pairing code\".\n"
-                        + "3. A notification of this app asks for the six digits: type them there, without leaving that screen.\n\n"
-                        + "Only this app, on this phone, uses the pairing. After a restart of the phone Wireless debugging is "
-                        + "off until you turn it on again.")
+                        + "Wireless debugging (or directly via Shizuku if running), the app can ask Android to end those of "
+                        + "your other apps while iOS runs, so Android does not close iOS for lack of memory.\n\n"
+                        + "1. If Shizuku is already running on this device, tap \"Use Shizuku\" (no pairing code needed).\n"
+                        + "2. Otherwise tap Pair > Developer options > Wireless debugging > \"Pair device with pairing code\".")
                 .setPositiveButton("Pair", (d, w) -> startPairing())
+                .setNeutralButton("Use Shizuku", (d, w) -> {
+                    if (!ShizukuBridge.available()) {
+                        Toast.makeText(this, "Shizuku is not running. Start the Shizuku app first, then tap Use Shizuku.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    ShizukuBridge.requestPermission();
+                })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
