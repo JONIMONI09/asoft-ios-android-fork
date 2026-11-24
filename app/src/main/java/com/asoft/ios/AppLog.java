@@ -52,7 +52,7 @@ final class AppLog {
         String line = new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date()) + " " + s;
         boolean sync = false;
         try {
-            sync = CompatConfig.syncLogging(c);
+            sync = CompatConfig.isSyncLogActive(c);
         } catch (RuntimeException ignored) {
             sync = false;
         }

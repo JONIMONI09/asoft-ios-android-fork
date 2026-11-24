@@ -18,6 +18,7 @@ final class CompatConfig {
     static final String PREFS = "asoft_compat26";
 
     static final String KEY_VANILLA_FALLBACK = "vanilla_fallback";
+    static final String KEY_KGSL_TRACE = "kgsl_trace";
     static final String KEY_SYNC_LOGGING = "sync_logging";
     static final String KEY_MULTI_VMA_BOUNCE = "multi_vma_bounce";
     static final String KEY_ALL_HOST_BOUNCE = "all_host_bounce";
@@ -28,35 +29,62 @@ final class CompatConfig {
     static final String KEY_IMPORT_THREAD_ALWAYS = "import_thread_always";
     static final String KEY_TU_DEBUG_SAFE = "tu_debug_safe";
     static final String KEY_VERBOSE_ENGINE_LOGS = "verbose_engine_logs";
+    static final String KEY_GPU_PROMPT_HANDLED = "gpu_prompt_handled";
 
     static final String TRACE_FILE = "kgsl-trace.txt";
     static final String SHIM_LIB = "libkgslshim.so";
     static final String SAFE_TU_DEBUG = "noubwc,flushall,sysmem";
 
+    /** True only while an iOS 26 / watchOS compat run is active; scopes AppLog fsync strictly to compat runs. */
+    private static volatile boolean compatRunActive;
+
     private CompatConfig() {}
 
     static final class Config {
         boolean vanillaFallback;
-        // Safe-defaults (ON out of the box)
-        boolean syncLogging = true;
-        boolean multiVmaBounce = true;
-        boolean kgslCacheSync = true;
-        boolean featureGuard = true;
-        boolean submitThrottle = true;
-        boolean lazySurfacesOff = true;
-        // Opt-in toggles (OFF by default)
+        // All mitigations and trace toggles default to OFF per maintainer review (#371)
+        boolean kgslTrace = false;
+        boolean syncLogging = false;
+        boolean multiVmaBounce = false;
+        boolean kgslCacheSync = false;
+        boolean featureGuard = false;
+        boolean submitThrottle = false;
+        boolean lazySurfacesOff = false;
         boolean allHostBounce = false;
         boolean importThreadAlways = false;
         boolean tuDebugSafe = false;
         boolean verboseEngineLogs = false;
 
+        /** Stock defaults: everything off until opted in. */
         static Config safeDefaults() {
             return new Config();
+        }
+
+        /** Diagnostic preset: synced KGSL trace + O_SYNC logs only, all mitigations OFF. */
+        static Config traceOnly() {
+            Config c = new Config();
+            c.kgslTrace = true;
+            c.syncLogging = true;
+            return c;
+        }
+
+        /** Recommended preset for known Issue #92 Snapdragon/KGSL GPUs when user accepts the GPU check prompt. */
+        static Config recommendedForKnownKgslBug() {
+            Config c = new Config();
+            c.kgslTrace = true;
+            c.syncLogging = true;
+            c.multiVmaBounce = true;
+            c.kgslCacheSync = true;
+            c.featureGuard = true;
+            c.submitThrottle = true;
+            c.lazySurfacesOff = true;
+            return c;
         }
 
         Config copy() {
             Config c = new Config();
             c.vanillaFallback = vanillaFallback;
+            c.kgslTrace = kgslTrace;
             c.syncLogging = syncLogging;
             c.multiVmaBounce = multiVmaBounce;
             c.kgslCacheSync = kgslCacheSync;
@@ -71,11 +99,11 @@ final class CompatConfig {
         }
 
         boolean needsIcdWrapper() {
-            return !vanillaFallback && (multiVmaBounce || allHostBounce || featureGuard || submitThrottle || syncLogging);
+            return !vanillaFallback && (kgslTrace || multiVmaBounce || allHostBounce || featureGuard || submitThrottle);
         }
 
         boolean needsLdPreload() {
-            return !vanillaFallback && (syncLogging || kgslCacheSync || multiVmaBounce || allHostBounce || featureGuard || submitThrottle);
+            return !vanillaFallback && (kgslTrace || syncLogging || kgslCacheSync || multiVmaBounce || allHostBounce || featureGuard || submitThrottle);
         }
     }
 
@@ -86,12 +114,13 @@ final class CompatConfig {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         Config cfg = new Config();
         cfg.vanillaFallback = p.getBoolean(KEY_VANILLA_FALLBACK, false);
-        cfg.syncLogging = p.getBoolean(KEY_SYNC_LOGGING, true);
-        cfg.multiVmaBounce = p.getBoolean(KEY_MULTI_VMA_BOUNCE, true);
-        cfg.kgslCacheSync = p.getBoolean(KEY_KGSL_CACHE_SYNC, true);
-        cfg.featureGuard = p.getBoolean(KEY_FEATURE_GUARD, true);
-        cfg.submitThrottle = p.getBoolean(KEY_SUBMIT_THROTTLE, true);
-        cfg.lazySurfacesOff = p.getBoolean(KEY_LAZY_SURFACES_OFF, true);
+        cfg.kgslTrace = p.getBoolean(KEY_KGSL_TRACE, false);
+        cfg.syncLogging = p.getBoolean(KEY_SYNC_LOGGING, false);
+        cfg.multiVmaBounce = p.getBoolean(KEY_MULTI_VMA_BOUNCE, false);
+        cfg.kgslCacheSync = p.getBoolean(KEY_KGSL_CACHE_SYNC, false);
+        cfg.featureGuard = p.getBoolean(KEY_FEATURE_GUARD, false);
+        cfg.submitThrottle = p.getBoolean(KEY_SUBMIT_THROTTLE, false);
+        cfg.lazySurfacesOff = p.getBoolean(KEY_LAZY_SURFACES_OFF, false);
         cfg.allHostBounce = p.getBoolean(KEY_ALL_HOST_BOUNCE, false);
         cfg.importThreadAlways = p.getBoolean(KEY_IMPORT_THREAD_ALWAYS, false);
         cfg.tuDebugSafe = p.getBoolean(KEY_TU_DEBUG_SAFE, false);
@@ -105,6 +134,7 @@ final class CompatConfig {
         }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean(KEY_VANILLA_FALLBACK, cfg.vanillaFallback)
+                .putBoolean(KEY_KGSL_TRACE, cfg.kgslTrace)
                 .putBoolean(KEY_SYNC_LOGGING, cfg.syncLogging)
                 .putBoolean(KEY_MULTI_VMA_BOUNCE, cfg.multiVmaBounce)
                 .putBoolean(KEY_KGSL_CACHE_SYNC, cfg.kgslCacheSync)
@@ -122,9 +152,34 @@ final class CompatConfig {
         save(c, Config.safeDefaults());
     }
 
+    static boolean needsGpuPrompt(Context c) {
+        if (c == null) {
+            return false;
+        }
+        return !c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_GPU_PROMPT_HANDLED, false);
+    }
+
+    static void markGpuPromptHandled(Context c) {
+        if (c == null) {
+            return;
+        }
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_GPU_PROMPT_HANDLED, true)
+                .apply();
+    }
+
+    static void setCompatRunActive(boolean active) {
+        compatRunActive = active;
+    }
+
     static boolean syncLogging(Context c) {
         Config cfg = load(c);
         return !cfg.vanillaFallback && cfg.syncLogging;
+    }
+
+    /** True only while a compat run is active AND syncLogging is enabled (prevents fsync on normal guests). */
+    static boolean isSyncLogActive(Context c) {
+        return compatRunActive && syncLogging(c);
     }
 
     static boolean shouldUseIcdShim(boolean compat26, boolean sysDriver, Config cfg) {
@@ -152,9 +207,9 @@ final class CompatConfig {
         if (cfg.syncLogging) {
             putIfNotOverridden(add, ov, "ASOFT_SYNC_LOG", "1");
             putIfNotOverridden(add, ov, "ASOFT_SYNC_SERIAL", "1");
-            if (runDir != null) {
-                putIfNotOverridden(add, ov, "ASOFT_KGSL_TRACE_FILE", new File(runDir, TRACE_FILE).getPath());
-            }
+        }
+        if (cfg.kgslTrace && runDir != null) {
+            putIfNotOverridden(add, ov, "ASOFT_KGSL_TRACE_FILE", new File(runDir, TRACE_FILE).getPath());
         }
         if (cfg.multiVmaBounce) {
             putIfNotOverridden(add, ov, "ASOFT_SHIM_MULTI_VMA_BOUNCE", "1");
@@ -203,20 +258,19 @@ final class CompatConfig {
     /** Short one-line summary for the Settings row subtitle. */
     static String summary(Config cfg) {
         if (cfg == null) {
-            return "Safe defaults";
+            return "Off (defaults)";
         }
         if (cfg.vanillaFallback) {
             return "Off (Vanilla 0.1.7)";
         }
-        boolean defaultsExact = cfg.syncLogging && cfg.multiVmaBounce && cfg.kgslCacheSync
-                && cfg.featureGuard && cfg.submitThrottle && cfg.lazySurfacesOff
-                && !cfg.allHostBounce && !cfg.importThreadAlways
-                && !cfg.tuDebugSafe && !cfg.verboseEngineLogs;
-        if (defaultsExact) {
-            return "Safe defaults";
-        }
         int on = countActive(cfg);
-        return on + " active (custom)";
+        if (on == 0) {
+            return "Off (defaults)";
+        }
+        if (cfg.kgslTrace && cfg.syncLogging && on == 2) {
+            return "KGSL trace + sync logs";
+        }
+        return on + " active";
     }
 
     static int countActive(Config cfg) {
@@ -224,6 +278,7 @@ final class CompatConfig {
             return 0;
         }
         int n = 0;
+        if (cfg.kgslTrace) n++;
         if (cfg.syncLogging) n++;
         if (cfg.multiVmaBounce) n++;
         if (cfg.kgslCacheSync) n++;
@@ -243,6 +298,7 @@ final class CompatConfig {
             return "gpu compat #92: vanilla fallback (all shims/overrides disabled)";
         }
         return "gpu compat #92: icdShim=" + (icdShimmed ? "on" : "off")
+                + ", kgslTrace=" + b(cfg.kgslTrace)
                 + ", syncLog=" + b(cfg.syncLogging)
                 + ", multiVmaBounce=" + b(cfg.multiVmaBounce)
                 + ", allHostBounce=" + b(cfg.allHostBounce)
