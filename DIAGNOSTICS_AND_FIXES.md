@@ -32,3 +32,24 @@
 - **Submit throttle:** Serializes queue submits (disable if boot stalls).
 - **Disable lazy IOSurface reparking:** Uses list mode (`REIMS_VGPU_LAZY_MAPPINGS=lists`).
 - **Opt-in toggles:** Keep OFF unless diagnosing a specific issue.
+
+---
+
+## 4. Direct Shizuku Integration (`ShizukuBridge.java`, `MemoryCleaner.java`, `MainActivity.java`)
+- **Date Added:** 2026-11-24 (`5da084d`)
+- **Problem:** Some OEM ROMs (such as REDMAGIC OS 11 / Android 16) collapse or block inline `RemoteInput` notification actions and disallow Split-Screen on Android's Settings pairing dialog.
+- **Solution:** Integrated official **Shizuku API 13.1.5** (`dev.rikka.shizuku:api:13.1.5` + `provider:13.1.5`). When Shizuku is running, tapping **Wireless debugging → Use Shizuku** opens Shizuku's native permission dialog and lets `MemoryCleaner` run `am kill-all` / `dumpsys meminfo` directly over Shizuku Binder (UID 2000) without needing notification pairing or Split-Screen.
+
+---
+
+## 5. `WadbPairService` Notification Verification vs. Upstream (`66d92fd`)
+- **Analysis:** Compared `WirelessAdb.java`, `WadbPairService.java`, and `AndroidManifest.xml` line-by-line against upstream `e85e49b`:
+  - `WirelessAdb.java` and `<service android:name=".WadbPairService">` are 100% identical to upstream.
+  - `WadbPairService.show()` previously skipped `startForeground()` when `lastShownText`/`lastShownAsk` matched, preventing notification refreshes. Removed in `66d92fd` so `show()` and `notification()` match upstream 1:1. Enforced by `WadbPairInputTest.remoteInputUsesUpstreamPendingIntentGetServiceAndAskGating()`.
+
+---
+
+## 6. Floating Window / Freeform & Persistent CI Signing (`e37ecb4`, `8e87f1b`)
+- **Floating Window:** Added `android.software.freeform_window_management`, `android.allow_multiple_resumed_activities`, and `<layout>` on `MainActivity` in `AndroidManifest.xml`.
+- **Persistent CI Keystore:** `.github/workflows/apk-release.yml` on `work-ci-branch` explicitly signs every APK with cached `~/.android/debug.keystore` via `apksigner` so all builds from `#15` onward install as in-place updates without data loss.
+
