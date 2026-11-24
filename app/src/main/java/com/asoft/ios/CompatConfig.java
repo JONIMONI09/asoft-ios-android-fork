@@ -145,7 +145,7 @@ final class CompatConfig {
                 .putBoolean(KEY_IMPORT_THREAD_ALWAYS, cfg.importThreadAlways)
                 .putBoolean(KEY_TU_DEBUG_SAFE, cfg.tuDebugSafe)
                 .putBoolean(KEY_VERBOSE_ENGINE_LOGS, cfg.verboseEngineLogs)
-                .apply();
+                .commit();
     }
 
     static void resetDefaults(Context c) {
@@ -165,7 +165,7 @@ final class CompatConfig {
         }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean(KEY_GPU_PROMPT_HANDLED, true)
-                .apply();
+                .commit();
     }
 
     static void setCompatRunActive(boolean active) {

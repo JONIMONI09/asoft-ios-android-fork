@@ -469,6 +469,7 @@ public class MainActivity extends Activity {
         if (saved == null) {
             showCrashOf(getIntent());
         }
+        UpdateCheck.checkOnStart(this, this::showUpdate);
     }
 
     /** Opened again from the crash notification (CLEAR_TOP | SINGLE_TOP): its report. */
@@ -1662,7 +1663,12 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setCustomTitle(titleRow)
-                .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+                .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> {
+                    checked[which] = isChecked;
+                    if (isChecked) {
+                        showCompat26OptionInfo((AlertDialog) d, labels[which], which, checked);
+                    }
+                })
                 .setPositiveButton("Save", (d, w) -> {
                     cfg.vanillaFallback = checked[0];
                     cfg.kgslTrace = checked[1];
@@ -1688,6 +1694,79 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void showCompat26OptionInfo(AlertDialog parent, String title, int which, boolean[] checked) {
+        String msg = compat26OptionDescription(which)
+                + "\n\nIf you are not sure what this setting does, leave it OFF.";
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(msg)
+                .setPositiveButton("OK (keep ON)", null)
+                .setNegativeButton("Turn OFF", (d, w) -> {
+                    checked[which] = false;
+                    if (parent != null && parent.getListView() != null) {
+                        parent.getListView().setItemChecked(which, false);
+                    }
+                })
+                .show();
+    }
+
+    private static String compat26OptionDescription(int which) {
+        switch (which) {
+            case 0:
+                return "What it does: Completely disables all GPU shims, traces, and overrides so iOS 26 launches exactly like stock 0.1.7.\n\n"
+                        + "When to enable it: You want to test stock behavior without losing your saved checkbox selections.\n\n"
+                        + "When to leave it OFF: Normal use when all other boxes are already off, or when you want to test specific compatibility fixes below.";
+            case 1:
+                return "What it does: Writes every GPU submit and KGSL call to kgsl-trace.txt and flushes it before the hardware runs it.\n\n"
+                        + "When to enable it: Your phone hard-reboots during iOS 26 boot or use and you need a trace log to share.\n\n"
+                        + "When to leave it OFF: Normal daily use (it adds disk I/O overhead on every GPU call).";
+            case 2:
+                return "What it does: Flushes serial, QEMU stderr, and app logs directly to storage (O_SYNC) during iOS 26 compatibility runs.\n\n"
+                        + "When to enable it: Your phone reboots suddenly and the last log lines are missing after restart.\n\n"
+                        + "When to leave it OFF: Normal use when your device is not rebooting (synchronous writes slow down heavy logging).";
+            case 3:
+                return "What it does: Copies multi-VMA host-pointer GPU imports through a 3-way byte-merged shadow buffer.\n\n"
+                        + "When to enable it: Your Snapdragon/Adreno device crashes or reboots inside KGSL during host-memory imports (Issue #92).\n\n"
+                        + "When to leave it OFF: iOS 26 already boots and runs without GPU kernel panics.";
+            case 4:
+                return "What it does: Issues a KGSL cache sync on imported buffers before GPU queue submits.\n\n"
+                        + "When to enable it: You see graphics corruption or KGSL crashes on Snapdragon devices that Multi-VMA bounce alone did not fix.\n\n"
+                        + "When to leave it OFF: Boot or rendering feels slow, or your device does not have KGSL cache corruption.";
+            case 5:
+                return "What it does: Hides sparse binding and host_image_copy Vulkan features from the guest GPU driver.\n\n"
+                        + "When to enable it: Your Turnip/KGSL driver crashes when iOS 26 tries to use sparse or host_image_copy operations.\n\n"
+                        + "When to leave it OFF: iOS 26 boots cleanly without Vulkan feature errors.";
+            case 6:
+                return "What it does: Serializes and limits concurrent Vulkan queue submits from the guest.\n\n"
+                        + "When to enable it: Your GPU driver hangs or reboots under bursty parallel submits.\n\n"
+                        + "When to leave it OFF: iOS 26 boot stalls or feels sluggish, or your device does not crash on submits.";
+            case 7:
+                return "What it does: Switches IOSurface reparking to list mode (REIMS_VGPU_LAZY_MAPPINGS=lists).\n\n"
+                        + "When to enable it: You hit IOSurface mapping crashes or freezes during iOS 26 UI rendering.\n\n"
+                        + "When to leave it OFF: Normal use when iOS 26 renders without IOSurface errors.";
+            case 8:
+                return "What it does: Forces shadow-buffer bouncing for ALL host-pointer imports, even simple 1-VMA buffers.\n\n"
+                        + "When to enable it: Only when diagnosing stubborn KGSL crashes that Multi-VMA bounce did not stop.\n\n"
+                        + "When to leave it OFF: Normal use (uses extra RAM and CPU bandwidth).";
+            case 9:
+                return "What it does: Forces Turnip to always use a dedicated KGSL import thread (TU_KGSL_IMPORT_THREAD=always).\n\n"
+                        + "When to enable it: Only when troubleshooting Turnip KGSL import threading issues.\n\n"
+                        + "When to leave it OFF: Normal use (default Turnip threading is faster and safer).";
+            case 10:
+                return "What it does: Sets conservative Turnip debug flags (noubwc,flushall,sysmem) that disable UBWC compression and force system memory.\n\n"
+                        + "When to enable it: Only to test whether GPU compression or tiling causes a crash or visual glitches.\n\n"
+                        + "When to leave it OFF: Normal use (significantly reduces GPU performance).";
+            case 11:
+                return "What it does: Enables verbose reims vGPU and metal2vulkan memory debug logging.\n\n"
+                        + "When to enable it: Only when a developer asks for detailed GPU memory allocation logs.\n\n"
+                        + "When to leave it OFF: Normal use (produces very large log files and slows down execution).";
+            default:
+                return "What it does: Changes an advanced iOS 26 GPU compatibility option.\n\n"
+                        + "When to enable it: Only when troubleshooting a specific iOS 26 GPU crash.\n\n"
+                        + "When to leave it OFF: Normal use.";
+        }
     }
 
     private void showCompat26HelpDialog() {
@@ -1720,13 +1799,14 @@ public class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("Free memory while iOS runs?")
-                .setMessage("While iOS runs, and only then, this app ends the background processes of your other apps "
-                        + "every 90 s, as Android does itself when memory runs short (and once before a setup step that "
-                        + "needs the memory). iOS needs 4 to 8 GB, and a save "
-                        + "3 GB more; without the room Android may close this app, iOS with it.\n\n"
-                        + "Your other apps are not force-stopped: their alarms and notifications stay. But an app "
-                        + "you left in the background starts again from its first screen when you open it, and "
-                        + "music or a call keeps running only if it shows a notification.")
+                .setMessage("What it does: While iOS runs (and once before memory-heavy setup steps or saves), this app "
+                        + "ends cached background processes of your other apps every 90 s. Your other apps are not "
+                        + "force-stopped (alarms and notifications stay), but background apps reload when reopened.\n\n"
+                        + "When to enable it: Devices with 8–12 GB RAM, or whenever Android closes iOS during setup, "
+                        + "boot, or saving state (iOS needs 4–8 GB, plus ~3 GB when saving).\n\n"
+                        + "When to leave it OFF: Devices with 16 GB+ RAM where iOS already runs and saves reliably "
+                        + "without Android killing it.\n\n"
+                        + "If you are not sure what this setting does, leave it OFF.")
                 .setPositiveButton("Turn on", (d, w) -> {
                     MemoryCleaner.setEnabled(this, true);
                     showSettings();
@@ -1919,18 +1999,17 @@ public class MainActivity extends Activity {
             long before = mi.availMem >> 20;
             String said;
             try {
-                boolean viaShizuku = !WirelessAdb.paired(this) && ShizukuBridge.granted();
-                if (viaShizuku) {
-                    ShizukuBridge.shell("am kill-all", 30_000);
-                } else {
-                    WirelessAdb.shell(this, "am kill-all", 30_000);
+                MemoryCleaner.ShellResult res = MemoryCleaner.runPrivilegedShell(this, "am kill-all", 30_000);
+                if (res == null) {
+                    throw new IOException("Neither Shizuku nor Wireless debugging is available");
                 }
                 Thread.sleep(1500);
                 am.getMemoryInfo(mi);
-                said = "It works" + (viaShizuku ? " (via Shizuku)" : "") + ": available memory " + before + " MB before, "
+                said = "It works (via " + res.backend + "): available memory " + before + " MB before, "
                         + (mi.availMem >> 20) + " MB after.";
             } catch (IOException e) {
-                said = "It did not work: " + (WirelessAdb.lastError != null ? WirelessAdb.lastError : e.getMessage()) + ".";
+                String msg = e.getMessage() != null ? e.getMessage() : WirelessAdb.lastError;
+                said = "It did not work: " + msg + ".";
             } catch (InterruptedException e) {
                 return;
             }

@@ -32,9 +32,13 @@ final class MemoryCleaner {
 
     private MemoryCleaner() {}
 
+    static boolean supported(int sdkInt, boolean wadbPaired, boolean shizukuGranted) {
+        return sdkInt < 34 || wadbPaired || shizukuGranted;
+    }
+
     /** Without a pairing (WirelessAdb) or Shizuku only up to Android 13. */
     static boolean supported(Context c) {
-        return Build.VERSION.SDK_INT < 34 || WirelessAdb.paired(c) || ShizukuBridge.granted();
+        return supported(Build.VERSION.SDK_INT, WirelessAdb.paired(c), ShizukuBridge.granted());
     }
 
     static boolean enabled(Context c) {
@@ -42,7 +46,7 @@ final class MemoryCleaner {
     }
 
     static void setEnabled(Context c, boolean on) {
-        prefs(c).edit().putBoolean(KEY, on).apply();
+        prefs(c).edit().putBoolean(KEY, on).commit();
         if (on && Guest.running()) {
             start(c);
         }
@@ -60,10 +64,10 @@ final class MemoryCleaner {
         Context app = c.getApplicationContext();
         loop = new Thread(() -> {
             // the first round once QEMU is up, then every PERIOD_MS while it runs
-            for (int i = 0; i < 100 && !Guest.running(); i++) {
+            for (int i = 0; i < 100 && !Guest.running() && !Thread.currentThread().isInterrupted(); i++) {
                 sleep(200);
             }
-            while (Guest.running() && enabled(app)) {
+            while (!Thread.currentThread().isInterrupted() && Guest.running() && enabled(app)) {
                 if (busy.compareAndSet(false, true)) {
                     try {
                         round(app, "free memory", 30_000);
@@ -179,19 +183,77 @@ final class MemoryCleaner {
         start(c);
     }
 
+    interface ShellBackend {
+        String run(String cmd, int timeoutMs) throws java.io.IOException;
+    }
+
+    static final class ShellResult {
+        final String output;
+        final String backend;
+
+        ShellResult(String output, String backend) {
+            this.output = output;
+            this.backend = backend;
+        }
+    }
+
+    /**
+     * Runs a privileged shell command, preferring live Shizuku (instant Binder check, no stale
+     * Wireless ADB retry stall) and falling back to Wireless ADB if paired.
+     * Returns null when neither backend is available.
+     */
+    static ShellResult runPrivilegedShell(
+            boolean shizukuGranted,
+            boolean wadbPaired,
+            ShellBackend shizuku,
+            ShellBackend wadb,
+            String cmd,
+            int timeoutMs) throws java.io.IOException {
+        java.io.IOException firstErr = null;
+        if (shizukuGranted) {
+            try {
+                return new ShellResult(shizuku.run(cmd, timeoutMs), "Shizuku");
+            } catch (java.io.IOException e) {
+                firstErr = e;
+            }
+        }
+        if (wadbPaired) {
+            try {
+                return new ShellResult(wadb.run(cmd, timeoutMs), "wireless adb");
+            } catch (java.io.IOException e) {
+                if (firstErr != null) {
+                    throw new java.io.IOException("Shizuku: " + firstErr.getMessage()
+                            + "; wireless adb: " + e.getMessage(), e);
+                }
+                throw e;
+            }
+        }
+        if (firstErr != null) {
+            throw firstErr;
+        }
+        return null;
+    }
+
+    static ShellResult runPrivilegedShell(Context c, String cmd, int timeoutMs) throws java.io.IOException {
+        return runPrivilegedShell(
+                ShizukuBridge.granted(),
+                WirelessAdb.paired(c),
+                ShizukuBridge::shell,
+                (command, timeout) -> WirelessAdb.shell(c, command, timeout),
+                cmd,
+                timeoutMs);
+    }
+
     /**
      * One round on the user's request (the memory sheet before a start): am kill-all. Returns {available before,
-     * after} in MB; through the pairing when there is one, else the app's own killBackgroundProcesses (Android 13
-     * and older, cached processes).
+     * after} in MB; through Shizuku or the pairing when available, else the app's own killBackgroundProcesses
+     * (Android 13 and older, cached processes).
      */
     static long[] freeNow(Context c, int timeoutMs) throws java.io.IOException {
         ActivityManager am = c.getSystemService(ActivityManager.class);
         long before = Helper.available(c) >> 20;
-        if (WirelessAdb.paired(c)) {
-            WirelessAdb.shell(c, "am kill-all", timeoutMs);
-        } else if (ShizukuBridge.granted()) {
-            ShizukuBridge.shell("am kill-all", timeoutMs);
-        } else {
+        ShellResult res = runPrivilegedShell(c, "am kill-all", timeoutMs);
+        if (res == null) {
             for (String p : others(c)) {
                 try {
                     am.killBackgroundProcesses(p);
@@ -214,20 +276,18 @@ final class MemoryCleaner {
         String top = "", summary = "";
     }
 
-    /** What the memory sheet shows, from one "dumpsys meminfo"; without the pairing, only why there is none. */
+    /** What the memory sheet shows, from one "dumpsys meminfo"; without Shizuku or pairing, only why there is none. */
     static Info info(Context c, int n, int timeoutMs) {
         Info i = new Info();
-        if (!WirelessAdb.paired(c) && !ShizukuBridge.granted()) {
-            i.top = "Wireless debugging is not paired (and Shizuku is not granted): the apps cannot be listed (the kill still ends this app's "
-                    + "background processes on Android 13 and older).";
-            return i;
-        }
         try {
-            String d = WirelessAdb.paired(c)
-                    ? WirelessAdb.shell(c, "dumpsys meminfo", timeoutMs)
-                    : ShizukuBridge.shell("dumpsys meminfo", timeoutMs);
-            i.top = topLines(d, n);
-            i.summary = summaryLines(d);
+            ShellResult res = runPrivilegedShell(c, "dumpsys meminfo", timeoutMs);
+            if (res == null) {
+                i.top = "Wireless debugging is not paired (and Shizuku is not granted): the apps cannot be listed (the kill still ends this app's "
+                        + "background processes on Android 13 and older).";
+                return i;
+            }
+            i.top = topLines(res.output, n);
+            i.summary = summaryLines(res.output);
             return i;
         } catch (java.io.IOException e) {
             i.top = "Could not list the apps: " + e.getMessage();
@@ -327,28 +387,23 @@ final class MemoryCleaner {
     private static void round(Context c, String what, int adbTimeoutMs) {
         ActivityManager am = c.getSystemService(ActivityManager.class);
         long before = availableMb(am);
-        if (WirelessAdb.paired(c) || ShizukuBridge.granted()) {
-            boolean useWadb = WirelessAdb.paired(c);
-            try {
-                if (useWadb) {
-                    WirelessAdb.shell(c, "am kill-all", adbTimeoutMs);
-                } else {
-                    ShizukuBridge.shell("am kill-all", adbTimeoutMs);
-                }
+        try {
+            ShellResult res = runPrivilegedShell(c, "am kill-all", adbTimeoutMs);
+            if (res != null) {
                 sleep(1500);
                 adbSaid = null;
-                AppLog.note(c, what + ": am kill-all through " + (useWadb ? "wireless adb" : "Shizuku")
+                AppLog.note(c, what + ": am kill-all through " + res.backend
                         + ", available " + before + " -> " + availableMb(am) + " MB");
                 return;
-            } catch (java.io.IOException e) {
-                String why = String.valueOf(e.getMessage());
-                if (!why.equals(adbSaid)) {
-                    adbSaid = why;
-                    AppLog.note(c, what + ": " + (useWadb ? "wireless adb: " : "Shizuku: ") + why);
-                }
-                if (Build.VERSION.SDK_INT >= 34) {
-                    return;     // nothing else an app may do here
-                }
+            }
+        } catch (java.io.IOException e) {
+            String why = String.valueOf(e.getMessage());
+            if (!why.equals(adbSaid)) {
+                adbSaid = why;
+                AppLog.note(c, what + ": privileged shell failed: " + why);
+            }
+            if (Build.VERSION.SDK_INT >= 34) {
+                return;     // nothing else an app may do here
             }
         }
         Set<String> apps = others(c);

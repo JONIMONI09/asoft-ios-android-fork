@@ -66,7 +66,7 @@ public class SetupService extends Service {
     }
 
     static void setKeepScreen(Context c, boolean on) {
-        c.getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean("keep-screen-on", on).apply();
+        c.getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean("keep-screen-on", on).commit();
         SetupService s = instance;
         if (s != null) {
             s.applyScreenLock();
@@ -103,7 +103,7 @@ public class SetupService extends Service {
     }
 
     static void setWifiOnly(Context c, boolean on) {
-        c.getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean("wifi-only", on).apply();
+        c.getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean("wifi-only", on).commit();
     }
 
     static void start(Context c) {
