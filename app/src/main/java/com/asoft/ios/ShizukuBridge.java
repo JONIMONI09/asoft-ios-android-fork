@@ -59,20 +59,38 @@ final class ShizukuBridge {
             if (proc == null) {
                 throw new IOException("Shizuku.newProcess returned null");
             }
-            InputStream in = proc.getInputStream();
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            long deadline = System.currentTimeMillis() + Math.max(1000, timeoutMs);
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                out.write(buf, 0, n);
-                if (System.currentTimeMillis() > deadline) {
-                    proc.destroy();
+            final Process killerTarget = proc;
+            final java.util.concurrent.atomic.AtomicBoolean timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            Thread watchdog = new Thread(() -> {
+                try {
+                    Thread.sleep(Math.max(1000, timeoutMs));
+                    timedOut.set(true);
+                    killerTarget.destroy();
+                } catch (InterruptedException ignored) {
+                    // finished before timeout
+                } catch (Throwable ignored) {
+                    // ignore
+                }
+            }, "shizuku-timeout");
+            watchdog.setDaemon(true);
+            watchdog.start();
+            try {
+                InputStream in = proc.getInputStream();
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
+                }
+                // Use 0-arg waitFor(): ShizukuRemoteProcess does not implement waitFor(long, TimeUnit)
+                proc.waitFor();
+                if (timedOut.get()) {
                     throw new IOException("Shizuku command timed out");
                 }
+                return out.toString(StandardCharsets.UTF_8.name());
+            } finally {
+                watchdog.interrupt();
             }
-            proc.waitFor(Math.max(500, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
-            return out.toString(StandardCharsets.UTF_8.name());
         } catch (IOException e) {
             throw e;
         } catch (Throwable t) {

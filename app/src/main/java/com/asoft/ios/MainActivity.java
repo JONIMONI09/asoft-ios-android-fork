@@ -428,11 +428,7 @@ public class MainActivity extends Activity {
         wadbValue = row(settings, "Wireless debugging", v -> wirelessDebugging());
         ((View) wadbValue.getParent()).setVisibility(WirelessAdb.supported() ? View.VISIBLE : View.GONE);
         compat26Value = row(settings, "iOS 26 GPU compatibility", v -> showCompat26Dialog());
-        updateValue = row(settings, "Check for updates", v -> {
-            UpdateCheck.setEnabled(this, !UpdateCheck.enabled(this));
-            showUpdate();
-            UpdateCheck.check(this, this::showUpdate);
-        });
+        updateValue = row(settings, "Check for updates", v -> showUpdateDialog());
         row(settings, "Set up or add a system", v -> startActivity(new Intent(this, SetupActivity.class)));
         logsValue = row(settings, "Logs", v -> startActivity(new Intent(this, LogsActivity.class)));
         row(settings, "Engine test", v -> advanced.setVisibility(advanced.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
@@ -517,11 +513,13 @@ public class MainActivity extends Activity {
 
     private final rikka.shizuku.Shizuku.OnRequestPermissionResultListener shizukuPermListener = (req, res) -> {
         if (req == ShizukuBridge.REQ_PERMISSION && res == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            WadbPairService.stop(this);
             MemoryCleaner.setEnabled(this, true);
             runOnUiThread(() -> {
                 if (!isFinishing()) {
+                    shown = "";
                     showSettings();
-                    Toast.makeText(this, "Shizuku granted. Free memory while iOS runs is now active.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Shizuku granted. Pairing search stopped; Free memory is now active.", Toast.LENGTH_LONG).show();
                 }
             });
         }
@@ -600,9 +598,9 @@ public class MainActivity extends Activity {
         updateText.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
         updateGet = link("Get it", 0xff8cc4ff, v -> {
             try {
-                startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(UpdateCheck.RELEASE_PAGE)));
+                startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(UpdateCheck.releasePage(this))));
             } catch (android.content.ActivityNotFoundException e) {
-                Toast.makeText(this, UpdateCheck.RELEASE_PAGE, Toast.LENGTH_LONG).show();
+                Toast.makeText(this, UpdateCheck.releasePage(this), Toast.LENGTH_LONG).show();
             }
         });
         line.addView(updateGet);
@@ -649,7 +647,31 @@ public class MainActivity extends Activity {
             updateNote.setText(n.text == null ? "" : n.text);
             updateNote.setVisibility(n.text == null ? View.GONE : View.VISIBLE);
         }
-        updateValue.setText(UpdateCheck.enabled(this) ? "On" : "Off");
+        updateValue.setText(!UpdateCheck.enabled(this) ? "Off"
+                : UpdateCheck.useForkChannel(this) ? "Fork CI" : "Upstream");
+    }
+
+    private void showUpdateDialog() {
+        String[] choices = {"Upstream (alpersamur3)", "Fork CI (JONIMONI09)", "Off"};
+        int current = !UpdateCheck.enabled(this) ? 2 : UpdateCheck.useForkChannel(this) ? 1 : 0;
+        new AlertDialog.Builder(this)
+                .setTitle("Update channel")
+                .setSingleChoiceItems(choices, current, (d, which) -> {
+                    UpdateCheck.setEnabled(this, which != 2);
+                    UpdateCheck.setUseForkChannel(this, which == 1);
+                    showUpdate();
+                    UpdateCheck.check(this, this::showUpdate);
+                    d.dismiss();
+                })
+                .setNeutralButton("Open releases", (d, w) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(UpdateCheck.releasePage(this))));
+                    } catch (android.content.ActivityNotFoundException e) {
+                        Toast.makeText(this, UpdateCheck.releasePage(this), Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void showPowerWarning() {
@@ -1510,9 +1532,14 @@ public class MainActivity extends Activity {
         compat26Value.setText(CompatConfig.summary(CompatConfig.load(this)));
         int records = CrashReport.files(this).size();
         logsValue.setText(records == 0 ? "" : records == 1 ? "1 record" : records + " records");
-        String pairing = WadbPairService.state;
-        wadbValue.setText(pairing != null ? "Pairing…"
-                : !WirelessAdb.paired(this) ? (ShizukuBridge.granted() ? "Shizuku" : "Not paired")
+        boolean shizukuOk = ShizukuBridge.granted();
+        if (shizukuOk && WadbPairService.running()) {
+            WadbPairService.stop(this);
+        }
+        String pairing = shizukuOk ? null : WadbPairService.state;
+        wadbValue.setText(shizukuOk ? "Shizuku"
+                : pairing != null ? "Pairing…"
+                : !WirelessAdb.paired(this) ? "Not paired"
                 : WirelessAdb.refused(this) ? "Pair again" : WirelessAdb.connected() ? "Connected"
                 : WirelessAdb.switchedOn(this) == 0 ? "Paired, off now" : "Paired");
     }
@@ -1670,12 +1697,51 @@ public class MainActivity extends Activity {
         if (!WirelessAdb.supported()) {
             return;
         }
+        if (ShizukuBridge.granted()) {
+            WadbPairService.stop(this);
+            new AlertDialog.Builder(this)
+                    .setTitle("Connected via Shizuku")
+                    .setMessage("ASoftware iOS has Shizuku permission and uses it directly to free background memory "
+                            + "while iOS runs — no Wireless debugging pairing code needed.")
+                    .setPositiveButton("Test now", (d, w) -> new Thread(() -> {
+                        String msg;
+                        try {
+                            String out = ShizukuBridge.shell("id -u", 5_000).trim();
+                            msg = "2000".equals(out) || "0".equals(out)
+                                    ? "Shizuku works (uid " + out + ")."
+                                    : "Shizuku replied: " + out;
+                        } catch (Exception e) {
+                            msg = "Shizuku test failed: " + e.getMessage();
+                        }
+                        String say = msg;
+                        runOnUiThread(() -> {
+                            if (!isFinishing()) {
+                                showSettings();
+                                Toast.makeText(this, say, Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }, "shizuku-test").start())
+                    .setNeutralButton("Pair Wireless ADB instead", (d, w) -> startPairing())
+                    .setNegativeButton("Close", null)
+                    .show();
+            return;
+        }
         if (WadbPairService.running()) {
             new AlertDialog.Builder(this)
                     .setTitle("Pairing")
                     .setMessage(WadbPairService.state)
-                    .setPositiveButton("Open Developer options", (d, w) -> openDeveloperOptions())
-                    .setNeutralButton("Enter code here", (d, w) -> showPairCodeDialog())
+                    .setPositiveButton("Use Shizuku", (d, w) -> {
+                        if (!ShizukuBridge.available()) {
+                            Toast.makeText(this, "Shizuku is not running. Start the Shizuku app first.", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        WadbPairService.stop(this);
+                        ShizukuBridge.requestPermission();
+                    })
+                    .setNeutralButton("Stop searching", (d, w) -> {
+                        WadbPairService.stop(this);
+                        showSettings();
+                    })
                     .setNegativeButton("Close", null)
                     .show();
             return;
@@ -1704,33 +1770,6 @@ public class MainActivity extends Activity {
                     .show();
             return;
         }
-        if (ShizukuBridge.granted()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Connected via Shizuku")
-                    .setMessage("ASoftware iOS has Shizuku permission and uses it directly to free background memory "
-                            + "while iOS runs — no Wireless debugging pairing code needed.")
-                    .setPositiveButton("Test now", (d, w) -> new Thread(() -> {
-                        String msg;
-                        try {
-                            String out = ShizukuBridge.shell("id -u", 5_000).trim();
-                            msg = "2000".equals(out) || "0".equals(out)
-                                    ? "Shizuku works (uid " + out + ")."
-                                    : "Shizuku replied: " + out;
-                        } catch (Exception e) {
-                            msg = "Shizuku test failed: " + e.getMessage();
-                        }
-                        String say = msg;
-                        runOnUiThread(() -> {
-                            if (!isFinishing()) {
-                                Toast.makeText(this, say, Toast.LENGTH_LONG).show();
-                            }
-                        });
-                    }, "shizuku-test").start())
-                    .setNeutralButton("Pair Wireless ADB instead", (d, w) -> startPairing())
-                    .setNegativeButton("Close", null)
-                    .show();
-            return;
-        }
         new AlertDialog.Builder(this)
                 .setTitle("Pair with Wireless debugging")
                 .setMessage("Android 14 and later let an app end only its own background processes. Paired with this phone's "
@@ -1744,6 +1783,7 @@ public class MainActivity extends Activity {
                         Toast.makeText(this, "Shizuku is not running. Start the Shizuku app first, then tap Use Shizuku.", Toast.LENGTH_LONG).show();
                         return;
                     }
+                    WadbPairService.stop(this);
                     ShizukuBridge.requestPermission();
                 })
                 .setNegativeButton("Cancel", null)

@@ -54,6 +54,12 @@ public class WadbPairService extends Service {
         c.startForegroundService(new Intent(c, WadbPairService.class));
     }
 
+    static void stop(Context c) {
+        if (running()) {
+            c.startService(new Intent(c, WadbPairService.class).setAction(ACTION_CANCEL));
+        }
+    }
+
     static void submitFromUi(Context c, String typed) {
         if (typed == null || typed.trim().isEmpty()) {
             return;
