@@ -94,6 +94,9 @@ jobs:
           EOF
           bash ./gradlew -I /tmp/mirror.init.gradle testDebugUnitTest assembleDebug -Dorg.gradle.java.home="$JAVA_HOME" --no-daemon --console=plain --max-workers=2
           cp app/build/outputs/apk/debug/app-debug.apk ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk
+          "$APKSIGNER" verify --print-certs ASoftware-iOS-Android-0.1.7-ux-stability-debug.apk
 
       - name: Upload workflow APK artifact
         uses: actions/upload-artifact@v4
