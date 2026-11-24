@@ -1703,24 +1703,7 @@ public class MainActivity extends Activity {
                     .setTitle("Connected via Shizuku")
                     .setMessage("ASoftware iOS has Shizuku permission and uses it directly to free background memory "
                             + "while iOS runs — no Wireless debugging pairing code needed.")
-                    .setPositiveButton("Test now", (d, w) -> new Thread(() -> {
-                        String msg;
-                        try {
-                            String out = ShizukuBridge.shell("id -u", 5_000).trim();
-                            msg = "2000".equals(out) || "0".equals(out)
-                                    ? "Shizuku works (uid " + out + ")."
-                                    : "Shizuku replied: " + out;
-                        } catch (Exception e) {
-                            msg = "Shizuku test failed: " + e.getMessage();
-                        }
-                        String say = msg;
-                        runOnUiThread(() -> {
-                            if (!isFinishing()) {
-                                showSettings();
-                                Toast.makeText(this, say, Toast.LENGTH_LONG).show();
-                            }
-                        });
-                    }, "shizuku-test").start())
+                    .setPositiveButton("Test now", (d, w) -> testWirelessAdb())
                     .setNeutralButton("Pair Wireless ADB instead", (d, w) -> startPairing())
                     .setNegativeButton("Close", null)
                     .show();
@@ -1865,10 +1848,16 @@ public class MainActivity extends Activity {
             long before = mi.availMem >> 20;
             String said;
             try {
-                WirelessAdb.shell(this, "am kill-all", 30_000);
+                boolean viaShizuku = !WirelessAdb.paired(this) && ShizukuBridge.granted();
+                if (viaShizuku) {
+                    ShizukuBridge.shell("am kill-all", 30_000);
+                } else {
+                    WirelessAdb.shell(this, "am kill-all", 30_000);
+                }
                 Thread.sleep(1500);
                 am.getMemoryInfo(mi);
-                said = "It works: available memory " + before + " MB before, " + (mi.availMem >> 20) + " MB after.";
+                said = "It works" + (viaShizuku ? " (via Shizuku)" : "") + ": available memory " + before + " MB before, "
+                        + (mi.availMem >> 20) + " MB after.";
             } catch (IOException e) {
                 said = "It did not work: " + (WirelessAdb.lastError != null ? WirelessAdb.lastError : e.getMessage()) + ".";
             } catch (InterruptedException e) {
