@@ -7,9 +7,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.SystemClock;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -17,7 +14,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -48,6 +47,7 @@ final class UpdateCheck {
     private static final int MAX_BODY = 1 << 20;
     private static final int MAX_TEXT = 300;
     private static final Pattern VERSION = Pattern.compile("(\\d{1,8})\\.(\\d{1,8})(?:\\.(\\d{1,8}))?(?:\\.(\\d{1,8}))?");
+    private static final Pattern ADVANCED_BUILD = Pattern.compile("-advanced-(\\d{1,8})\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern BLOCK = Pattern.compile("<!--\\s*app-notice\\b");
 
     static final int NORMAL = 0, IMPORTANT = 1, CRITICAL = 2;
@@ -80,7 +80,7 @@ final class UpdateCheck {
     }
 
     static void setEnabled(Context c, boolean on) {
-        prefs(c).edit().putBoolean("check", on).apply();
+        prefs(c).edit().putBoolean("check", on).commit();
         lastAsked = 0;
     }
 
@@ -89,12 +89,17 @@ final class UpdateCheck {
     }
 
     static void setUseForkChannel(Context c, boolean fork) {
-        prefs(c).edit().putBoolean("fork_channel", fork).apply();
+        prefs(c).edit().putBoolean("fork_channel", fork).commit();
+        latest = null;
         lastAsked = 0;
     }
 
     static String releasePage(Context c) {
         return useForkChannel(c) ? FORK_RELEASE_PAGE : RELEASE_PAGE;
+    }
+
+    static String apiUrl(boolean forkChannel) {
+        return forkChannel ? ApkUpdater.FORK_API : API;
     }
 
     private static boolean debug(Context c) {
@@ -142,6 +147,14 @@ final class UpdateCheck {
         return p;
     }
 
+    private static int advancedBuild(String s) {
+        if (s == null) {
+            return -1;
+        }
+        Matcher m = ADVANCED_BUILD.matcher(s);
+        return m.find() ? Integer.parseInt(m.group(1)) : -1;
+    }
+
     static boolean newer(String tag, String version) {
         int[] a = parts(tag);
         int[] b = parts(version);
@@ -150,7 +163,9 @@ final class UpdateCheck {
                 return a[i] > b[i];
             }
         }
-        return false;
+        int ab = advancedBuild(tag);
+        int bb = advancedBuild(version);
+        return ab > bb;
     }
 
     /** What the home screen should announce now, or null. */
@@ -173,7 +188,13 @@ final class UpdateCheck {
     }
 
     static void dismiss(Context c, String tag) {
-        prefs(c).edit().putString("dismissed", tag).putLong("dismissedAt", System.currentTimeMillis()).apply();
+        prefs(c).edit().putString("dismissed", tag).putLong("dismissedAt", System.currentTimeMillis()).commit();
+    }
+
+    /** Forces a fresh update check on app startup regardless of the 6-hour throttle. */
+    static void checkOnStart(Activity a, Runnable done) {
+        lastAsked = 0;
+        check(a, done);
     }
 
     /** Asks GitHub in the background when it is time to, then runs @done on the screen's thread. */
@@ -185,16 +206,17 @@ final class UpdateCheck {
         lastAsked = now;
         Context c = a.getApplicationContext();
         String version = version(a);
+        boolean forkChannel = useForkChannel(a);
         // read here, not on the thread: a debug build's stand-in for the newest release's notes
         String testBody = testFile(a, "update-test-notice");
         Thread t = new Thread(() -> {
             boolean ok = true;
             try {
-                Notice n = fetch(version, testBody);
+                Notice n = fetch(version, testBody, forkChannel);
                 latest = n;
-                AppLog.note(c, n == null ? "update check: nothing newer than " + version
-                        : "update check: " + n.tag + " (level " + n.level + (n.text != null ? ", with a text" : "")
-                        + "), this app " + version);
+                AppLog.note(c, n == null ? "update check (" + (forkChannel ? "fork" : "upstream") + "): nothing newer than " + version
+                        : "update check (" + (forkChannel ? "fork" : "upstream") + "): " + n.tag + " (level " + n.level
+                        + (n.text != null ? ", with a text" : "") + "), this app " + version);
             } catch (Exception e) {
                 AppLog.note(c, "update check failed: " + e);
                 ok = false;
@@ -215,24 +237,36 @@ final class UpdateCheck {
     }
 
     /** The newest published release above @version with its text, at the highest level among all of them; null if none. */
-    private static Notice fetch(String version, String testBody) throws Exception {
-        JSONArray releases = new JSONArray(get(version));
+    private static Notice fetch(String version, String testBody, boolean forkChannel) throws Exception {
+        String json = get(apiUrl(forkChannel), "application/vnd.github+json", version, MAX_BODY);
+        return selectNotice(json, version, testBody, forkChannel);
+    }
+
+    /** Pure JSON release selection helper (testable on JVM without Android org.json stubs). */
+    @SuppressWarnings("unchecked")
+    static Notice selectNotice(String json, String version, String testBody, boolean allowPrerelease) {
+        Object parsed = MiniJson.parse(json);
+        if (!(parsed instanceof List)) {
+            return null;
+        }
         String tag = null;
         String body = null;
         // the highest level among the newer releases other than the newest; the newest's own is
         // added at the end, so that the debug test body really stands in for it
         int older = NORMAL;
-        for (int i = 0; i < releases.length(); i++) {
-            JSONObject r = releases.optJSONObject(i);
-            if (r == null || r.optBoolean("draft") || r.optBoolean("prerelease")) {
+        for (Object item : (List<?>) parsed) {
+            if (!(item instanceof Map)) {
                 continue;
             }
-            String t = r.optString("tag_name", "");
+            Map<String, Object> r = (Map<String, Object>) item;
+            if (MiniJson.bool(r, "draft") || (!allowPrerelease && MiniJson.bool(r, "prerelease"))) {
+                continue;
+            }
+            String t = MiniJson.str(r, "tag_name");
             if (t.isEmpty() || !newer(t, version)) {
                 continue;
             }
-            // "body" is JSON null for a release with no notes, and optString would make that "null"
-            String b = r.isNull("body") ? "" : r.optString("body", "");
+            String b = MiniJson.str(r, "body");
             // the list comes newest first, but go by the version number in case one was edited later
             if (tag == null || newer(t, tag)) {
                 if (tag != null) {
@@ -252,10 +286,6 @@ final class UpdateCheck {
         }
         String[] newest = block(body);
         return new Notice(tag, text(newest), Math.max(older, level(newest)));
-    }
-
-    private static String get(String version) throws Exception {
-        return get(API, "application/vnd.github+json", version, MAX_BODY);
     }
 
     /** A GET of @url (GitHub's API or raw.githubusercontent.com), no sign-in; the answer may be @max bytes long. */

@@ -61,6 +61,20 @@ final class ShizukuBridge {
             }
             final Process killerTarget = proc;
             final java.util.concurrent.atomic.AtomicBoolean timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            Thread stderrDrainer = new Thread(() -> {
+                try (InputStream err = killerTarget.getErrorStream()) {
+                    if (err != null) {
+                        byte[] drainBuf = new byte[1024];
+                        while (err.read(drainBuf) != -1) {
+                            // discard stderr so verbose output never deadlocks the child pipe
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // stream closed or process exited
+                }
+            }, "shizuku-stderr");
+            stderrDrainer.setDaemon(true);
+            stderrDrainer.start();
             Thread watchdog = new Thread(() -> {
                 try {
                     Thread.sleep(Math.max(1000, timeoutMs));
@@ -88,6 +102,16 @@ final class ShizukuBridge {
                     throw new IOException("Shizuku command timed out");
                 }
                 return out.toString(StandardCharsets.UTF_8.name());
+            } catch (IOException e) {
+                if (timedOut.get()) {
+                    throw new IOException("Shizuku command timed out", e);
+                }
+                throw e;
+            } catch (Throwable t) {
+                if (timedOut.get()) {
+                    throw new IOException("Shizuku command timed out", t);
+                }
+                throw new IOException("Shizuku shell failed: " + t.getMessage(), t);
             } finally {
                 watchdog.interrupt();
             }

@@ -65,4 +65,59 @@ public class ApkUpdaterTest {
         assertFalse(ApkUpdater.sha256Matches(h, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
         assertNull(ApkUpdater.extractSha256("md5:1234"));
     }
+
+    @Test
+    public void skipsDraftReleasesEvenWhenPrereleasesAllowed() {
+        String json = "["
+                + "{\"tag_name\":\"v0.1.7-advanced-99\",\"draft\":true,\"prerelease\":true,\"assets\":["
+                + "{\"name\":\"app.apk\",\"browser_download_url\":\"https://example/draft.apk\",\"size\":1000}"
+                + "]},"
+                + "{\"tag_name\":\"v0.1.7-advanced-21\",\"draft\":false,\"prerelease\":true,\"assets\":["
+                + "{\"name\":\"app.apk\",\"browser_download_url\":\"https://example/live.apk\",\"size\":2000}"
+                + "]}"
+                + "]";
+        ApkUpdater.ReleaseAsset a = ApkUpdater.parseLatestApk(json, true);
+        assertNotNull(a);
+        assertEquals("v0.1.7-advanced-21", a.tag);
+        assertEquals("https://example/live.apk", a.downloadUrl);
+    }
+
+    @Test
+    public void verifyResultAllGreenAndSummaryLinesCoverAllOutcomes() {
+        File dummy = new File("update.apk");
+        String sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        // All green with GitHub SHA-256 digest
+        ApkUpdater.VerifyResult ok = new ApkUpdater.VerifyResult(
+                dummy, true, true, true, true, true, true, sha, "0.1.7", null);
+        assertTrue(ok.allGreen());
+        String okSummary = ok.summaryLines("v0.1.7-advanced-21");
+        assertTrue(okSummary.contains("[OK] Valid APK archive"));
+        assertTrue(okSummary.contains("[OK] Signing key matches installed app"));
+        assertTrue(okSummary.contains("[OK] SHA-256 matches GitHub release digest"));
+
+        // Different signing key: warning only (error == null, allGreen == false)
+        ApkUpdater.VerifyResult sigWarn = new ApkUpdater.VerifyResult(
+                dummy, true, true, true, false, false, true, sha, "0.1.7", null);
+        assertFalse(sigWarn.allGreen());
+        String warnSummary = sigWarn.summaryLines("v0.1.8");
+        assertTrue(warnSummary.contains("[WARN] Different signing key"));
+        assertTrue(warnSummary.contains("[OK] SHA-256 computed: 0123456789abcdef"));
+
+        // Hash mismatch failure
+        ApkUpdater.VerifyResult hashFail = new ApkUpdater.VerifyResult(
+                dummy, true, true, true, true, true, false, sha, "0.1.7", "SHA-256 checksum mismatch.");
+        assertFalse(hashFail.allGreen());
+        String hashSummary = hashFail.summaryLines("v0.1.7-advanced-21");
+        assertTrue(hashSummary.contains("[FAIL] SHA-256 matches GitHub release digest"));
+        assertTrue(hashSummary.contains("Error: SHA-256 checksum mismatch."));
+
+        // Unsigned APK failure
+        ApkUpdater.VerifyResult unsigned = new ApkUpdater.VerifyResult(
+                dummy, true, true, false, false, false, true, sha, "0.1.7", "APK is not signed.");
+        assertFalse(unsigned.allGreen());
+        String unsignedSummary = unsigned.summaryLines("v0.1.7-advanced-21");
+        assertTrue(unsignedSummary.contains("[FAIL] APK is cryptographically signed"));
+        assertTrue(unsignedSummary.contains("Error: APK is not signed."));
+    }
 }

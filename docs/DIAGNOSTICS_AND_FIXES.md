@@ -62,4 +62,23 @@
   - **Download & Install** streams the latest `.apk` asset into `cache/share/update.apk` while computing SHA-256, checks valid APK/ZIP structure (`AndroidManifest.xml` + `classes.dex`), verifies `packageName == com.asoft.ios`, compares the APK's signing certificate SHA-256 against the installed app, checks GitHub's SHA-256 digest when provided, displays the `[OK]` verification summary, and launches Android's native update dialog directly via `ShareProvider` + `REQUEST_INSTALL_PACKAGES`.
   - Added `android:resizeableActivity="true"` across all activities (`MainActivity`, `SetupActivity`, `LogsActivity`, `ScreenActivity`) and `android.supports_size_changes="true"`.
 
+---
+
+## 8. Non-GPU Reliability Fixes: Shizuku-First RAM Cleaner, Reboot-Safe Settings, Startup Update Check & Per-Toggle Guidance
+- **Date Added:** 2026-11-24
+- **RAM Cleaning & Shizuku Reliability (`MemoryCleaner.java`, `ShizukuBridge.java`, `MainActivity.java`):**
+  - Added `MemoryCleaner.runPrivilegedShell()` preferring live `ShizukuBridge.granted()` first and automatically falling back to `WirelessAdb.shell(...)` on `IOException`. Used across `round()`, `freeNow()`, `info()`, and `MainActivity.testWirelessAdb()` so a stale/disabled Wireless ADB pairing (`ECONNREFUSED`) never blocks working Shizuku.
+  - Checked `!Thread.currentThread().isInterrupted()` in `MemoryCleaner.start()` so an interrupted background loop exits cleanly.
+  - Added a daemon `shizuku-stderr` drainer thread in `ShizukuBridge.shell()` so verbose stderr never deadlocks the child process, and ensured watchdog kills always report `"Shizuku command timed out"` even if the stdout stream throws an `IOException`.
+- **Reboot-Safe Settings Persistence (`CompatConfig.java`, `MemoryCleaner.java`, `SetupService.java`, `UpdateCheck.java`):**
+  - Switched `SharedPreferences` writes from asynchronous `.apply()` to synchronous `.commit()` in `CompatConfig.save()`, `CompatConfig.markGpuPromptHandled()`, `MemoryCleaner.setEnabled()`, `SetupService.setKeepScreen()`, `SetupService.setWifiOnly()`, `UpdateCheck.setEnabled()`, `UpdateCheck.setUseForkChannel()`, and `UpdateCheck.dismiss()` so user preferences survive sudden hard reboots.
+- **Startup Update Check for Upstream & Fork CI (`UpdateCheck.java`, `MainActivity.java`):**
+  - Added `UpdateCheck.checkOnStart()` (invoked in `MainActivity.onCreate()`) to run a fresh update check on every app launch.
+  - Routed Fork CI checks to `ApkUpdater.FORK_API`, allowed `prerelease: true` (while still skipping `draft: true`), added `-advanced-<N>` build-number comparison in `UpdateCheck.newer()`, and cleared the cached `latest` notice when switching channels.
+- **Per-Toggle Plain-English Guidance (`MainActivity.java`):**
+  - Turning any option ON in **iOS 26 GPU compatibility (#92)** now shows a plain-English dialog explaining what it does, when to enable it, when to leave it OFF, and `"If you are not sure what this setting does, leave it OFF."` with a quick **Turn OFF** option.
+  - Clarified **Free memory while iOS runs** guidance for 8–12 GB vs. 16 GB+ devices.
+- **Unit Tests & Docs:**
+  - Added `UpdateCheckTest.java`, expanded `MemoryCleanerTest.java` and `ApkUpdaterTest.java`, and organized custom fork markdown docs under `docs/`.
+
 
