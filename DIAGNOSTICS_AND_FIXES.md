@@ -53,3 +53,13 @@
 - **Floating Window:** Added `android.software.freeform_window_management`, `android.allow_multiple_resumed_activities`, and `<layout>` on `MainActivity` in `AndroidManifest.xml`.
 - **Persistent CI Keystore:** `.github/workflows/apk-release.yml` on `work-ci-branch` explicitly signs every APK with cached `~/.android/debug.keystore` via `apksigner` so all builds from `#15` onward install as in-place updates without data loss.
 
+---
+
+## 7. Verified In-App GitHub Release APK Updater (`ApkUpdater.java`, `ShareProvider.java`, `MainActivity.java`, `ApkUpdaterTest.java`)
+- **Date Added:** 2026-11-24
+- **Features:**
+  - Lets users pick between **Upstream (`alpersamur3`)** and **Fork CI (`JONIMONI09`)** update channels with an explicit warning that switching channels uses a different signing key (requiring backup + uninstall first).
+  - **Download & Install** streams the latest `.apk` asset into `cache/share/update.apk` while computing SHA-256, checks valid APK/ZIP structure (`AndroidManifest.xml` + `classes.dex`), verifies `packageName == com.asoft.ios`, compares the APK's signing certificate SHA-256 against the installed app, checks GitHub's SHA-256 digest when provided, displays the `[OK]` verification summary, and launches Android's native update dialog directly via `ShareProvider` + `REQUEST_INSTALL_PACKAGES`.
+  - Added `android:resizeableActivity="true"` across all activities (`MainActivity`, `SetupActivity`, `LogsActivity`, `ScreenActivity`) and `android.supports_size_changes="true"`.
+
+

@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Free memory while iOS runs (MemoryCleaner): other apps' background processes, Android 13 and older -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <!-- Verified in-app APK updates from GitHub Releases (ApkUpdater) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <intent>
@@ -37,6 +39,9 @@
         <meta-data
             android:name="android.allow_multiple_resumed_activities"
             android:value="true" />
+        <meta-data
+            android:name="android.supports_size_changes"
+            android:value="true" />
 
         <activity
             android:name=".MainActivity"
@@ -58,13 +63,15 @@
         <activity
             android:name=".SetupActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode"
-            android:exported="false" />
+            android:exported="false"
+            android:resizeableActivity="true" />
 
         <!-- what the app kept when something went wrong (CrashReport's records), the app's log, the GPU check's -->
         <activity
             android:name=".LogsActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode"
-            android:exported="false" />
+            android:exported="false"
+            android:resizeableActivity="true" />
 
         <!-- exported in the debug build only: adb starts it in tests -->
         <activity
@@ -72,6 +79,7 @@
             android:exported="${testExported}"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode"
             android:launchMode="singleTask"
+            android:resizeableActivity="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
 
         <!-- exported in the debug build only: driven from adb -->

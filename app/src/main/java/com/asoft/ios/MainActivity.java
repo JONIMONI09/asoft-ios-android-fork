@@ -657,12 +657,22 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Update channel")
                 .setSingleChoiceItems(choices, current, (d, which) -> {
-                    UpdateCheck.setEnabled(this, which != 2);
-                    UpdateCheck.setUseForkChannel(this, which == 1);
-                    showUpdate();
-                    UpdateCheck.check(this, this::showUpdate);
+                    boolean switchingStream = which != 2 && current != 2 && which != current;
                     d.dismiss();
+                    if (switchingStream) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Different signing key warning")
+                                .setMessage("Switching between Upstream (alpersamur3) and Fork CI (JONIMONI09) uses a "
+                                        + "different Android signing key. Android will require uninstalling the current app "
+                                        + "first, which deletes app data unless you back it up beforehand.\n\nSwitch channel anyway?")
+                                .setPositiveButton("Switch channel", (d2, w2) -> applyUpdateChannel(which))
+                                .setNegativeButton("Cancel", null)
+                                .show();
+                    } else {
+                        applyUpdateChannel(which);
+                    }
                 })
+                .setPositiveButton("Download & Install", (d, w) -> startVerifiedApkUpdate())
                 .setNeutralButton("Open releases", (d, w) -> {
                     try {
                         startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(UpdateCheck.releasePage(this))));
@@ -672,6 +682,67 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Close", null)
                 .show();
+    }
+
+    private void applyUpdateChannel(int which) {
+        UpdateCheck.setEnabled(this, which != 2);
+        UpdateCheck.setUseForkChannel(this, which == 1);
+        showUpdate();
+        UpdateCheck.check(this, this::showUpdate);
+    }
+
+    private void startVerifiedApkUpdate() {
+        boolean fork = UpdateCheck.useForkChannel(this);
+        AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("Checking latest release")
+                .setMessage("Contacting GitHub (" + (fork ? "Fork CI" : "Upstream") + ")…")
+                .setCancelable(false)
+                .show();
+        new Thread(() -> {
+            try {
+                ApkUpdater.ReleaseAsset asset = ApkUpdater.fetchLatest(this, fork);
+                runOnUiThread(() -> {
+                    if (!isFinishing()) {
+                        progress.setTitle("Downloading " + asset.tag);
+                        progress.setMessage("Downloading " + asset.assetName + "…");
+                    }
+                });
+                ApkUpdater.VerifyResult res = ApkUpdater.downloadAndVerify(this, asset, (done, total) ->
+                        runOnUiThread(() -> {
+                            if (!isFinishing()) {
+                                String pct = total > 0 ? (done * 100 / total) + "% (" + (done >> 20) + " / " + (total >> 20) + " MB)"
+                                        : (done >> 20) + " MB";
+                                progress.setMessage("Downloading " + asset.assetName + "\n" + pct);
+                            }
+                        }));
+                runOnUiThread(() -> {
+                    progress.dismiss();
+                    if (isFinishing()) {
+                        return;
+                    }
+                    AlertDialog.Builder b = new AlertDialog.Builder(this)
+                            .setTitle(res.allGreen() ? "Verification passed" : "Verification check")
+                            .setMessage(res.summaryLines(asset.tag))
+                            .setNegativeButton("Cancel", null);
+                    if (res.error == null) {
+                        String btn = res.signatureMatch ? "Install update" : "Open installer anyway";
+                        b.setPositiveButton(btn, (d2, w2) -> ApkUpdater.launchInstaller(this, res.apkFile));
+                    }
+                    b.show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progress.dismiss();
+                    if (!isFinishing()) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Update failed")
+                                .setMessage(String.valueOf(e.getMessage()))
+                                .setPositiveButton("OK", null)
+                                .show();
+                    }
+                });
+            }
+        }, "apk-updater").start();
     }
 
     private void showPowerWarning() {
