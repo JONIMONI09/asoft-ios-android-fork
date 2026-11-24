@@ -22,6 +22,8 @@
         </intent>
     </queries>
 
+    <uses-feature android:name="android.software.freeform_window_management" android:required="false" />
+
     <application
         android:name=".AsoftApp"
         android:extractNativeLibs="true"
@@ -32,10 +34,21 @@
         android:resizeableActivity="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
+        <meta-data
+            android:name="android.allow_multiple_resumed_activities"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode"
-            android:exported="true">
+            android:exported="true"
+            android:resizeableActivity="true">
+            <layout
+                android:defaultWidth="360dp"
+                android:defaultHeight="540dp"
+                android:gravity="top|end"
+                android:minWidth="240dp"
+                android:minHeight="280dp" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
