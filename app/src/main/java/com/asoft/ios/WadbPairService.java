@@ -112,7 +112,13 @@ public class WadbPairService extends Service {
     }
 
     private void show(String text, boolean ask) {
+        if (foregrounded && text.equals(lastShownText) && ask == lastShownAsk) {
+            return;
+        }
         state = text;
+        lastShownText = text;
+        lastShownAsk = ask;
+        foregrounded = true;
         startForeground(ID, notification(text, ask, true), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
 
@@ -157,11 +163,14 @@ public class WadbPairService extends Service {
             if (done || pairing) {
                 return;
             }
-            port = p;
-            discoveredPort = p;
-            if (p > 0) {
+            if (shouldNotifyPortChange(p, port)) {
+                port = p;
+                discoveredPort = p;
+                AppLog.note(this, "wireless adb: pairing dialog detected on port " + p);
                 show("The pairing dialog is open: type its six digits here (Enter the code).", true);
-            } else {
+            } else if (p <= 0 && port > 0) {
+                port = -1;
+                discoveredPort = -1;
                 show(SEARCHING, false);
             }
         }));
