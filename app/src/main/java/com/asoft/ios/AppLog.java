@@ -67,7 +67,7 @@ final class AppLog {
 
     /** QEMU's and the guest's last lines, before a new start overwrites them. */
     static void keepRunLogs(Context c) {
-        for (String n : new String[] {"qemu-stderr.txt", "serial.txt", CompatConfig.TRACE_FILE}) {
+        for (String n : new String[] {"qemu-stderr.txt", "serial.txt", CompatConfig.TRACE_FILE, BootDiagnostics.FILE_NAME}) {
             File from = new File(Guest.runDir(c), n);
             if (!from.isFile()) {
                 continue;

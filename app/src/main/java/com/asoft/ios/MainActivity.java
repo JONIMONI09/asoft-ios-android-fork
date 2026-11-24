@@ -1524,8 +1524,23 @@ public class MainActivity extends Activity {
                 cfg.tuDebugSafe,
                 cfg.verboseEngineLogs
         };
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.setPadding(dp(24), dp(18), dp(16), dp(8));
+        TextView titleTxt = new TextView(this);
+        titleTxt.setText("iOS 26 GPU compatibility (#92)");
+        titleTxt.setTextSize(19);
+        titleTxt.setTypeface(Typeface.DEFAULT_BOLD);
+        titleTxt.setTextColor(TEXT);
+        titleRow.addView(titleTxt, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView helpBtn = Ui.link(this, " ? ", Ui.LINK, v -> showCompat26HelpDialog());
+        helpBtn.setTextSize(18);
+        helpBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        titleRow.addView(helpBtn);
+
         new AlertDialog.Builder(this)
-                .setTitle("iOS 26 GPU compatibility (#92)")
+                .setCustomTitle(titleRow)
                 .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Save", (d, w) -> {
                     cfg.vanillaFallback = checked[0];
@@ -1551,6 +1566,24 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "Defaults restored (all off)", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showCompat26HelpDialog() {
+        String help = "All options default to OFF (stock 0.1.7 behavior).\n\n"
+                + "• KGSL crash trace: Writes synced GPU calls to kgsl-trace.txt. Turn ON first if your device reboots during iOS 26 boot.\n\n"
+                + "• Crash-safe O_SYNC logging: Flushes serial/stderr/app logs immediately during compat runs so the last lines survive a reboot.\n\n"
+                + "• Multi-VMA host-import bounce: Uses byte-merged shadow memory for multi-VMA host pointers. Enable if KGSL crashes on host imports.\n\n"
+                + "• KGSL cache sync: Syncs imported buffers before GPU submits. Can reduce speed; turn OFF first if boot feels very slow.\n\n"
+                + "• Compat feature guard: Hides sparse binding & host_image_copy extensions from the guest GPU driver.\n\n"
+                + "• Submit throttle: Serializes Vulkan queue submits. Turn OFF if a boot hangs or stalls.\n\n"
+                + "• Disable lazy IOSurface reparking: Uses list mode for IOSurface mappings.\n\n"
+                + "• Opt-in toggles (Bounce ALL, Dedicated import thread, Turnip safe debug, Verbose engine logs): Diagnostic/experimental only — keep OFF unless troubleshooting a specific crash.\n\n"
+                + "Troubleshooting tip: If your phone still reboots, share kgsl-trace.txt from Logs. If a mitigation stops the reboot, disable options one by one to find which single switch fixed it.";
+        new AlertDialog.Builder(this)
+                .setTitle("About GPU compatibility settings")
+                .setMessage(help)
+                .setPositiveButton("OK", null)
                 .show();
     }
 

@@ -193,14 +193,35 @@ int asoft_is_guarded_extension(const char *ext_name)
             || strcmp(ext_name, "VK_NV_device_generated_commands") == 0;
 }
 
+#ifndef ASOFT_SHIM_HOST_TEST
+static int shim_raw_open(const char *path, int flags, mode_t mode);
+static int shim_raw_close(int fd);
+#endif
+
 static int open_trace_fd(const char *path, int use_osync)
 {
     int flags = O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | (use_osync ? O_SYNC : 0);
+#ifndef ASOFT_SHIM_HOST_TEST
+    int fd = shim_raw_open(path, flags, 0600);
+    if (fd < 0 && use_osync) {
+        fd = shim_raw_open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+    }
+#else
     int fd = open(path, flags, 0600);
     if (fd < 0 && use_osync) {
         fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
     }
+#endif
     return fd;
+}
+
+static void close_trace_fd(int fd)
+{
+#ifndef ASOFT_SHIM_HOST_TEST
+    (void)shim_raw_close(fd);
+#else
+    (void)close(fd);
+#endif
 }
 
 int asoft_trace_write(const char *path, const char *line, size_t max_bytes, int use_osync)
@@ -230,7 +251,7 @@ int asoft_trace_write(const char *path, const char *line, size_t max_bytes, int 
             if (errno == EINTR) {
                 continue;
             }
-            close(fd);
+            close_trace_fd(fd);
             return -1;
         }
         off += (size_t)w;
@@ -239,7 +260,7 @@ int asoft_trace_write(const char *path, const char *line, size_t max_bytes, int 
         const char nl = '\n';
         (void)write(fd, &nl, 1);
     }
-    close(fd);
+    close_trace_fd(fd);
     return 0;
 }
 
@@ -350,6 +371,7 @@ struct asoft_kgsl_gpu_command {
 static pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_trace_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_turnip_load_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct asoft_shim_config g_cfg;
 static char g_trace_path[512];
@@ -392,6 +414,26 @@ static void init_shim_globals(void)
 static void ensure_init(void)
 {
     pthread_once(&g_init_once, init_shim_globals);
+}
+
+static int shim_raw_open(const char *path, int flags, mode_t mode)
+{
+    ensure_init();
+    if (!g_real_open) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return g_real_open(path, flags, mode);
+}
+
+static int shim_raw_close(int fd)
+{
+    ensure_init();
+    if (!g_real_close) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return g_real_close(fd);
 }
 
 static void trace_logf(const char *fmt, ...)
@@ -868,7 +910,13 @@ static uint64_t g_vk_submit_seq = 0;
 static int ensure_turnip_loaded(void)
 {
     ensure_init();
-    pthread_mutex_lock(&g_state_lock);
+    int just_loaded = 0;
+    const char *loaded_path = NULL;
+    PFN_vk_icdGetInstanceProcAddr gipa = NULL;
+
+    /* Use dedicated g_turnip_load_lock (never g_state_lock) because dlopen() invokes close()
+     * which enters our LD_PRELOAD interposer -> untrack_kgsl_fd() -> g_state_lock. */
+    pthread_mutex_lock(&g_turnip_load_lock);
     if (!g_turnip_handle) {
         const char *path = getenv("ASOFT_REAL_TURNIP_PATH");
         if (!path || !*path) {
@@ -877,7 +925,7 @@ static int ensure_turnip_loaded(void)
         g_turnip_handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
         if (!g_turnip_handle) {
             SHIM_LOGE("dlopen(%s) failed: %s", path, dlerror());
-            pthread_mutex_unlock(&g_state_lock);
+            pthread_mutex_unlock(&g_turnip_load_lock);
             return -1;
         }
         g_turnip_negotiate = (PFN_vk_icdNegotiateLoaderICDInterfaceVersion)
@@ -886,13 +934,18 @@ static int ensure_turnip_loaded(void)
                 dlsym(g_turnip_handle, "vk_icdGetInstanceProcAddr");
         g_turnip_gpdpa = (PFN_vk_icdGetPhysicalDeviceProcAddr)
                 dlsym(g_turnip_handle, "vk_icdGetPhysicalDeviceProcAddr");
+        just_loaded = 1;
+        loaded_path = path;
+    }
+    gipa = g_turnip_gipa;
+    pthread_mutex_unlock(&g_turnip_load_lock);
+
+    if (just_loaded) {
         trace_logf("icd_init real_turnip=%s gipa=%p cfg(bounce=%d/%d cache=%d guard=%d throttle=%d sync=%d/%d)",
-                path, (void *)g_turnip_gipa, g_cfg.multi_vma_bounce, g_cfg.all_host_bounce,
+                loaded_path, (void *)gipa, g_cfg.multi_vma_bounce, g_cfg.all_host_bounce,
                 g_cfg.cache_sync, g_cfg.feature_guard, g_cfg.submit_throttle, g_cfg.sync_log, g_cfg.sync_serial);
     }
-    int ok = (g_turnip_gipa != NULL);
-    pthread_mutex_unlock(&g_state_lock);
-    return ok ? 0 : -1;
+    return (gipa != NULL) ? 0 : -1;
 }
 
 static struct instance_entry *find_instance(VkInstance inst)
