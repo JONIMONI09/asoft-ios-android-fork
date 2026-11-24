@@ -125,10 +125,26 @@ size_t asoft_bounce_sync_to_shadow(struct asoft_bounce_region *reg)
     size_t synced = 0;
     for (size_t off = 0; off < reg->size; off += ASOFT_PAGE_SIZE) {
         size_t chunk = (reg->size - off >= ASOFT_PAGE_SIZE) ? (size_t)ASOFT_PAGE_SIZE : (reg->size - off);
-        if (memcmp(reg->host_ptr + off, reg->prev_ptr + off, chunk) != 0) {
-            memcpy(reg->shadow_ptr + off, reg->host_ptr + off, chunk);
-            memcpy(reg->prev_ptr + off, reg->host_ptr + off, chunk);
+        const uint8_t *h = reg->host_ptr + off;
+        uint8_t *s = reg->shadow_ptr + off;
+        uint8_t *p = reg->prev_ptr + off;
+        if (memcmp(h, p, chunk) == 0) {
+            continue;
+        }
+        if (memcmp(s, p, chunk) == 0) {
+            /* Pure CPU modification on this page: fast whole-page copy */
+            memcpy(s, h, chunk);
+            memcpy(p, h, chunk);
             synced += chunk;
+        } else {
+            /* Concurrent CPU + GPU writes in same 4 KiB page: byte-level 3-way merge so GPU writes are preserved */
+            for (size_t i = 0; i < chunk; i++) {
+                if (h[i] != p[i]) {
+                    s[i] = h[i];
+                    p[i] = h[i];
+                    synced++;
+                }
+            }
         }
     }
     return synced;

@@ -2442,6 +2442,7 @@ final class Guest {
         importMarkerAtStart = compat26 && sys && ImportMode.marker(run).isFile();
         env.putAll(ImportMode.envAdditions(compat26 && sys, importMarkerAtStart, ov));
         boolean ios26Compat = !watch && compat26;
+        CompatConfig.setCompatRunActive(ios26Compat);
         CompatConfig.Config compatCfg = CompatConfig.load(c);
         boolean icdShimmed = CompatConfig.shouldUseIcdShim(ios26Compat, sys, compatCfg);
         if (icdShimmed && !ov.containsKey("env.VK_DRIVER_FILES")) {

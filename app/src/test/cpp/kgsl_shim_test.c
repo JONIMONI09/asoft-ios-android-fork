@@ -147,10 +147,52 @@ static void test_trace_rotation_and_sync_write(void)
     rmdir(dir);
 }
 
+static void test_host_to_shadow_preserves_concurrent_gpu_writes(void)
+{
+    const size_t sz = 4096;
+    uint8_t *host = calloc(1, sz);
+    uint8_t *shadow = calloc(1, sz);
+    uint8_t *prev = calloc(1, sz);
+    assert(host && shadow && prev);
+
+    memset(host, 0x11, sz);
+    memcpy(shadow, host, sz);
+    memcpy(prev, host, sz);
+
+    struct asoft_bounce_region reg = {
+        .host_ptr = host,
+        .shadow_ptr = shadow,
+        .prev_ptr = prev,
+        .size = sz,
+        .host_writable = 1,
+    };
+
+    /* GPU writes at offset 64, CPU concurrently writes at offset 128 on the same 4 KiB page */
+    shadow[64] = 0xAA;
+    host[128] = 0xBB;
+
+    /* Host -> Shadow must copy CPU's byte (128) without clobbering GPU's byte (64) */
+    size_t synced = asoft_bounce_sync_to_shadow(&reg);
+    assert(synced == 1);
+    assert(shadow[128] == 0xBB);
+    assert(shadow[64] == 0xAA);
+
+    /* Shadow -> Host then merges GPU's byte (64) back without clobbering CPU's byte (128) */
+    size_t written = asoft_bounce_sync_to_host(&reg);
+    assert(written > 0);
+    assert(host[64] == 0xAA);
+    assert(host[128] == 0xBB);
+
+    free(host);
+    free(shadow);
+    free(prev);
+}
+
 int main(void)
 {
     test_proc_maps_single_and_multi_vma();
     test_three_way_page_diff_bounce();
+    test_host_to_shadow_preserves_concurrent_gpu_writes();
     test_guarded_extensions();
     test_trace_rotation_and_sync_write();
     printf("kgsl_shim_test: all assertions passed\n");

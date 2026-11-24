@@ -90,11 +90,25 @@
 
 ---
 
-## Verification Report (`work-ci-branch`)
+## Verification Report
 
 - **NDK C Checks (`aarch64-linux-android29-clang`):** `render.c` (`-Wall -Werror`) & `kgsl_shim.c` (`-Wall -Wextra -Werror`) — **0 errors, 0 warnings**.
-- **C Host Unit Test (`gcc -DASOFT_SHIM_HOST_TEST -Wall -Wextra -Werror`):** `kgsl_shim_test` — **all assertions passed**.
-- **Android JVM Unit Tests (`./gradlew testDebugUnitTest`):** **50 suites, 419 tests (418 passed, 0 failed, 0 errors, 1 skipped** via JUnit assumption on non-ARM64 devbox) — includes `PauseStateTest`, `GeometrySafetyTest`, `GameEnvGuardTest`, `CrashPersistenceTest`, and `WadbPairInputTest` (including `remoteInputUsesUpstreamPendingIntentGetServiceAndAskGating`).
-- **Android Lint (`./gradlew lintReportDebug`):** **0 new errors / `NewApi` warnings** in any modified or added file.
+- **C Host Unit Test (`gcc -DASOFT_SHIM_HOST_TEST -Wall -Wextra -Werror`):** `kgsl_shim_test` (including concurrent CPU+GPU same-page Host→Shadow 3-way merge test) — **all assertions passed**.
+- **Android JVM Unit Tests (`./gradlew testDebugUnitTest`):** **50 suites, 421 tests (420 passed, 0 failed, 0 errors, 1 skipped** via JUnit assumption on non-ARM64 devbox) — includes `CompatConfigTest`, `AppLogSyncTest`, `PauseStateTest`, `GeometrySafetyTest`, `GameEnvGuardTest`, `CrashPersistenceTest`, and `WadbPairInputTest`.
+
+---
+
+# Part 3 — PR #371 Maintainer Review Fixes & Affected-GPU Prompt
+
+1. **Byte-granular 3-way merge on Host → Shadow (`app/src/main/cpp/kgsl_shim.c`, `app/src/test/cpp/kgsl_shim_test.c`):**
+   - `asoft_bounce_sync_to_shadow()` now uses byte-level 3-way merge when both CPU and GPU wrote to the same 4 KiB page (`if (h[i] != p[i]) { s[i] = h[i]; p[i] = h[i]; }`), preserving concurrent GPU writes instead of overwriting the whole page. Covered by `test_host_to_shadow_preserves_concurrent_gpu_writes()`.
+2. **All Mitigations OFF by Default + Independent KGSL Trace Switch (`CompatConfig.java`, `MainActivity.java`, `CompatConfigTest.java`):**
+   - All compat mitigations and trace toggles default to `false` until opted in.
+   - `kgslTrace` (`KEY_KGSL_TRACE`) is now its own independent switch separate from `syncLogging` (`O_SYNC` stderr/serial/app log).
+3. **Compat-Run-Scoped `AppLog` `fsync` (`AppLog.java`, `Guest.java`, `CompatConfig.java`):**
+   - `AppLog.note0()` now gates `fsync` on `CompatConfig.isSyncLogActive(c)` (active only while an `ios26 && compat26` run is active and `syncLogging` is enabled — zero `fsync` overhead for normal guests).
+4. **Affected-GPU Check Prompt (`Setup26Screen.java`, `CompatConfig.java`):**
+   - When `GpuCheck` detects a Snapdragon/KGSL compatibility-mode GPU (`r.pass && r.nosparse && !systemDriver`), shows a native `AlertDialog` informing the user about Issue `#92` and auto-saving their choice (`Recommended + trace`, `Trace only`, or `Keep defaults`).
+
 
 

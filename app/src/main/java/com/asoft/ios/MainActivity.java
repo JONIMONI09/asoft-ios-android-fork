@@ -1497,9 +1497,10 @@ public class MainActivity extends Activity {
     private void showCompat26Dialog() {
         CompatConfig.Config cfg = CompatConfig.load(this).copy();
         final String[] labels = {
-                "Vanilla 0.1.7 fallback (disable all mitigations)",
-                "Crash-safe O_SYNC logging (app / stderr / serial / KGSL trace)",
-                "Multi-VMA host-import bounce (3-way page-diff shadow memory)",
+                "Vanilla 0.1.7 fallback (disable all shims/overrides)",
+                "KGSL crash trace (synced kgsl-trace.txt before submits)",
+                "Crash-safe O_SYNC logging (app / stderr / serial in compat mode)",
+                "Multi-VMA host-import bounce (3-way byte-diff shadow memory)",
                 "KGSL cache sync before GPU submits",
                 "Compat feature guard (strip sparse & host_image_copy)",
                 "Submit throttle (serialize & bound queue submits)",
@@ -1511,6 +1512,7 @@ public class MainActivity extends Activity {
         };
         final boolean[] checked = {
                 cfg.vanillaFallback,
+                cfg.kgslTrace,
                 cfg.syncLogging,
                 cfg.multiVmaBounce,
                 cfg.kgslCacheSync,
@@ -1527,24 +1529,26 @@ public class MainActivity extends Activity {
                 .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("Save", (d, w) -> {
                     cfg.vanillaFallback = checked[0];
-                    cfg.syncLogging = checked[1];
-                    cfg.multiVmaBounce = checked[2];
-                    cfg.kgslCacheSync = checked[3];
-                    cfg.featureGuard = checked[4];
-                    cfg.submitThrottle = checked[5];
-                    cfg.lazySurfacesOff = checked[6];
-                    cfg.allHostBounce = checked[7];
-                    cfg.importThreadAlways = checked[8];
-                    cfg.tuDebugSafe = checked[9];
-                    cfg.verboseEngineLogs = checked[10];
+                    cfg.kgslTrace = checked[1];
+                    cfg.syncLogging = checked[2];
+                    cfg.multiVmaBounce = checked[3];
+                    cfg.kgslCacheSync = checked[4];
+                    cfg.featureGuard = checked[5];
+                    cfg.submitThrottle = checked[6];
+                    cfg.lazySurfacesOff = checked[7];
+                    cfg.allHostBounce = checked[8];
+                    cfg.importThreadAlways = checked[9];
+                    cfg.tuDebugSafe = checked[10];
+                    cfg.verboseEngineLogs = checked[11];
                     CompatConfig.save(this, cfg);
+                    CompatConfig.markGpuPromptHandled(this);
                     showSettings();
                     Toast.makeText(this, "Applies on next iOS 26 start", Toast.LENGTH_SHORT).show();
                 })
-                .setNeutralButton("Safe defaults", (d, w) -> {
+                .setNeutralButton("Reset (all off)", (d, w) -> {
                     CompatConfig.resetDefaults(this);
                     showSettings();
-                    Toast.makeText(this, "Safe defaults restored", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Defaults restored (all off)", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Cancel", null)
                 .show();

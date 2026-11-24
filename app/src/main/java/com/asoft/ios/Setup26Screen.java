@@ -220,8 +220,40 @@ final class Setup26Screen {
         new Thread(() -> {
             GpuCheck.Result r = GpuCheck.run(a);
             gpuResult = r;
-            a.runOnUiThread(() -> builtFor = "");
+            a.runOnUiThread(() -> {
+                builtFor = "";
+                maybePromptKnownKgslGpu(r);
+            });
         }, "gpucheck-run").start();
+    }
+
+    /**
+     * When GPU check detects a Snapdragon/KGSL compatibility-mode GPU (no host-memory sparse binding,
+     * Upstream Issue #92), inform the user in native dialog style and auto-save the selected compat preset.
+     */
+    private void maybePromptKnownKgslGpu(GpuCheck.Result r) {
+        if (r == null || !r.pass || !r.nosparse || GpuCheck.systemDriver(a) || !CompatConfig.needsGpuPrompt(a)) {
+            return;
+        }
+        if (a.isFinishing() || a.isDestroyed()) {
+            return;
+        }
+        new android.app.AlertDialog.Builder(a)
+                .setTitle("Known GPU compatibility issue (#92)")
+                .setMessage("This Snapdragon GPU runs iOS 26 in compatibility mode (no host-memory sparse binding), "
+                        + "which can cause freezes or device reboots during setup or boot.\n\n"
+                        + "Do you want to continue with recommended mitigations and KGSL crash trace enabled, "
+                        + "or continue with crash trace only?")
+                .setPositiveButton("Recommended + trace", (d, w) -> {
+                    CompatConfig.save(a, CompatConfig.Config.recommendedForKnownKgslBug());
+                    CompatConfig.markGpuPromptHandled(a);
+                })
+                .setNeutralButton("Trace only", (d, w) -> {
+                    CompatConfig.save(a, CompatConfig.Config.traceOnly());
+                    CompatConfig.markGpuPromptHandled(a);
+                })
+                .setNegativeButton("Keep defaults", (d, w) -> CompatConfig.markGpuPromptHandled(a))
+                .show();
     }
 
     private TextView gpuLink(String s, View.OnClickListener l) {
