@@ -108,7 +108,30 @@
 3. **Compat-Run-Scoped `AppLog` `fsync` (`AppLog.java`, `Guest.java`, `CompatConfig.java`):**
    - `AppLog.note0()` now gates `fsync` on `CompatConfig.isSyncLogActive(c)` (active only while an `ios26 && compat26` run is active and `syncLogging` is enabled — zero `fsync` overhead for normal guests).
 4. **Affected-GPU Check Prompt (`Setup26Screen.java`, `CompatConfig.java`):**
-   - When `GpuCheck` detects a Snapdragon/KGSL compatibility-mode GPU (`r.pass && r.nosparse && !systemDriver`), shows a native `AlertDialog` informing the user about Issue `#92` and auto-saving their choice (`Recommended + trace`, `Trace only`, or `Keep defaults`).
+   - When `GpuCheck` detects a Snapdragon/KGSL compatibility-mode GPU (`r.pass && r.nosparse && !systemDriver`), shows a native `AlertDialog` informing the user about Issue `#92` and auto-saving their choice (`Recommended (fast)`, `Trace only`, or `Keep defaults`).
+
+---
+
+# Part 4 — Shizuku Bridge, Verified In-App Updater, Sleep-Safe `DataMigration` & `kgsl_shim.c` Performance Pack (`2026-11-24` – `2026-11-25`)
+
+1. **Direct Shizuku Bridge & Shizuku-First RAM Cleaner (`ShizukuBridge.java`, `MemoryCleaner.java`, `MainActivity.java`):**
+   - Integrated official Shizuku API `13.1.5` (`dev.rikka.shizuku:api` + `provider`).
+   - Added `MemoryCleaner.runPrivilegedShell()` preferring live Shizuku over stale Wireless ADB pairings (`ECONNREFUSED`), with automatic fallback, clean interrupt exit, stderr draining, and reliable timeout reporting.
+   - Added clickable Home-screen `adbWarn` banner when Shizuku / Wireless debugging is disconnected on Android 14+, `"Grant Shizuku"` status, and one-tap **Use Shizuku** in all ADB dialogs.
+2. **Verified In-App GitHub Release APK Updater (`ApkUpdater.java`, `UpdateCheck.java`, `ShareProvider.java`, `MainActivity.java`, `app/build.gradle`):**
+   - Added Upstream (`alpersamur3`) vs. Fork CI (`JONIMONI09`) update channels with signing-key change warning, startup update check (`UpdateCheck.checkOnStart()`), and optional `-PasoftVersionName=...` in `app/build.gradle` for exact Fork CI version matching.
+   - Added Setup/iOS running guard (`SetupService.busy() || Guest.running()`), live installed-vs-latest version check, `"App is up to date"` dialog with **Force reinstall** (clearing cached APK files via `ApkUpdater.clearCache()`), download-size vs. free-storage confirmation, transient DNS/network retry, `canRequestPackageInstalls()` check with `onResume()` auto-resume, and `safeDismiss()` dialog protection.
+3. **Reboot-Safe Settings & Sleep-Safe `DataMigration` (`CompatConfig.java`, `SetupService.java`, `MemoryCleaner.java`, `UpdateCheck.java`, `PhoneSetup26.java`):**
+   - Switched `SharedPreferences` writes to synchronous `.commit()` across settings classes.
+   - Subtracted Android Deep Sleep duration (`elapsedRealtime - uptimeMillis`) from `PhoneSetup26.iosWallpaper()` active minutes and `MigrationWatch`, preventing false ceiling aborts after overnight device sleep.
+4. **Setup-Safe GPU-Aware Preset & 5 High-Impact `kgsl_shim.c` Performance Optimizations (`kgsl_shim.c`, `kgsl_shim.h`, `CompatConfig.java`, `MainActivity.java`):**
+   - Kept `lazySurfacesOff = false` (prevents 65,530 `vm.max_map_count` crashes during `DataMigration`) and `kgslTrace = false` / `syncLogging = false` (no per-submit flash `fsync`) in `recommendedForKnownKgslBug()`, plus **Auto for GPU** button and per-toggle plain-English explanations.
+   - **Fix 1 (`submitThrottle`):** Skip `vkQueueWaitIdle()` drain when `pSubmits` signals any Vulkan semaphore (eliminates full-pipeline stalls on `reims` timeline-semaphore frames).
+   - **Fix 2 (`kgslCacheSync`):** Batch BO syncs into a single `IOCTL_KGSL_GPUOBJ_SYNC` syscall per KGSL fd, eliminate duplicate sync in `IOCTL_KGSL_GPU_COMMAND` via thread-local `t_in_vk_submit`, skip when `g_kgsl_bo_count == 0`, and deduplicate `vkGetFenceStatus` polling syncs.
+   - **Fix 3 (`/proc/self/maps`):** Gate parsing on active bounce/trace and `break` immediately once `lo >= end`.
+   - **Fix 4 (`multiVmaBounce`):** Prefer `HOST_VISIBLE | HOST_COHERENT | HOST_CACHED` over uncached WC shadow memory, use a dedicated `g_bounce_lock`, and skip scans when `g_bounce_active_count == 0`.
+   - **Fix 5 (`LD_PRELOAD`):** Use a lock-free atomic FD bitset (`g_kgsl_fd_bits`) for non-KGSL `close()`/`ioctl()` calls and only inject `LD_PRELOAD` when `kgslTrace || syncLogging || kgslCacheSync` is enabled.
+
 
 
 

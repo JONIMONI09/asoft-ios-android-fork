@@ -242,9 +242,9 @@ final class Setup26Screen {
                 .setTitle("Known GPU compatibility issue (#92)")
                 .setMessage("This Snapdragon GPU runs iOS 26 in compatibility mode (no host-memory sparse binding), "
                         + "which can cause freezes or device reboots during setup or boot.\n\n"
-                        + "Do you want to continue with recommended mitigations and KGSL crash trace enabled, "
-                        + "or continue with crash trace only?")
-                .setPositiveButton("Recommended + trace", (d, w) -> {
+                        + "Do you want to enable the recommended setup-safe mitigations (keeps crash trace and O_SYNC "
+                        + "off for full speed, and keeps lazy IOSurface reparking on), or enable crash trace only?")
+                .setPositiveButton("Recommended (fast)", (d, w) -> {
                     CompatConfig.save(a, CompatConfig.Config.recommendedForKnownKgslBug());
                     CompatConfig.markGpuPromptHandled(a);
                 })

@@ -72,7 +72,10 @@ int asoft_parse_proc_maps(FILE *fp, uintptr_t start, size_t size, struct asoft_v
         if (sscanf(line, "%llx-%llx %7s", &lo, &hi, perms) != 3) {
             continue;
         }
-        if ((uintptr_t)hi <= start || (uintptr_t)lo >= end) {
+        if ((uintptr_t)lo >= end) {
+            break; /* /proc/self/maps is sorted by ascending virtual address */
+        }
+        if ((uintptr_t)hi <= start) {
             continue;
         }
         uintptr_t ov_lo = (uintptr_t)lo > start ? (uintptr_t)lo : start;
@@ -191,6 +194,44 @@ int asoft_is_guarded_extension(const char *ext_name)
     return strcmp(ext_name, "VK_EXT_host_image_copy") == 0
             || strcmp(ext_name, "VK_EXT_device_generated_commands") == 0
             || strcmp(ext_name, "VK_NV_device_generated_commands") == 0;
+}
+
+int asoft_select_bounce_mem_type(
+        const uint32_t *prop_flags,
+        uint32_t count,
+        uint32_t preferred_idx,
+        uint32_t host_visible_bit,
+        uint32_t host_coherent_bit,
+        uint32_t host_cached_bit)
+{
+    if (!prop_flags || count == 0) {
+        return (int)preferred_idx;
+    }
+    uint32_t need_cached = host_visible_bit | host_coherent_bit | host_cached_bit;
+    uint32_t need_coherent = host_visible_bit | host_coherent_bit;
+
+    if (preferred_idx < count && (prop_flags[preferred_idx] & need_cached) == need_cached) {
+        return (int)preferred_idx;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        if ((prop_flags[i] & need_cached) == need_cached) {
+            return (int)i;
+        }
+    }
+    if (preferred_idx < count && (prop_flags[preferred_idx] & need_coherent) == need_coherent) {
+        return (int)preferred_idx;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        if ((prop_flags[i] & need_coherent) == need_coherent) {
+            return (int)i;
+        }
+    }
+    return (int)preferred_idx;
+}
+
+int asoft_submit_needs_throttle_drain(int has_fence, uint32_t total_signal_semaphores)
+{
+    return (!has_fence && total_signal_semaphores == 0) ? 1 : 0;
 }
 
 #ifndef ASOFT_SHIM_HOST_TEST
@@ -466,9 +507,12 @@ static void trace_logf(const char *fmt, ...)
 
 #define MAX_KGSL_FDS 32
 #define MAX_KGSL_BOS 2048
+#define KGSL_FD_BITSET_MAX 1024
 
+static uint64_t g_kgsl_fd_bits[KGSL_FD_BITSET_MAX / 64];
 static int g_kgsl_fds[MAX_KGSL_FDS];
 static int g_kgsl_fd_count = 0;
+static int g_kgsl_high_fd_count = 0;
 
 struct kgsl_tracked_bo {
     int in_use;
@@ -480,28 +524,45 @@ struct kgsl_tracked_bo {
 };
 
 static struct kgsl_tracked_bo g_kgsl_bos[MAX_KGSL_BOS];
+static int g_kgsl_bo_count = 0;
+static int g_kgsl_sync_mode = 0; /* 0 = try batched GPUOBJ_SYNC, 1 = batched works, 2 = legacy per-BO GPUMEM_SYNC_CACHE */
 static uint64_t g_kgsl_cmd_count = 0;
+static uint64_t g_gpu_work_gen = 0;
+static __thread int t_in_vk_submit = 0;
 
 static void track_kgsl_fd(int fd)
 {
     if (fd < 0) return;
-    pthread_mutex_lock(&g_state_lock);
-    for (int i = 0; i < g_kgsl_fd_count; i++) {
-        if (g_kgsl_fds[i] == fd) {
-            pthread_mutex_unlock(&g_state_lock);
-            return;
+    if (fd < KGSL_FD_BITSET_MAX) {
+        __atomic_fetch_or(&g_kgsl_fd_bits[fd >> 6], (1ULL << (fd & 63)), __ATOMIC_RELEASE);
+    } else {
+        pthread_mutex_lock(&g_state_lock);
+        int exists = 0;
+        for (int i = 0; i < g_kgsl_fd_count; i++) {
+            if (g_kgsl_fds[i] == fd) {
+                exists = 1;
+                break;
+            }
         }
+        if (!exists && g_kgsl_fd_count < MAX_KGSL_FDS) {
+            g_kgsl_fds[g_kgsl_fd_count++] = fd;
+            __atomic_add_fetch(&g_kgsl_high_fd_count, 1, __ATOMIC_RELEASE);
+        }
+        pthread_mutex_unlock(&g_state_lock);
     }
-    if (g_kgsl_fd_count < MAX_KGSL_FDS) {
-        g_kgsl_fds[g_kgsl_fd_count++] = fd;
-    }
-    pthread_mutex_unlock(&g_state_lock);
     trace_logf("kgsl_open fd=%d", fd);
 }
 
 static int is_kgsl_fd(int fd)
 {
     if (fd < 0) return 0;
+    if (fd < KGSL_FD_BITSET_MAX) {
+        uint64_t word = __atomic_load_n(&g_kgsl_fd_bits[fd >> 6], __ATOMIC_ACQUIRE);
+        return (int)((word >> (fd & 63)) & 1ULL);
+    }
+    if (__atomic_load_n(&g_kgsl_high_fd_count, __ATOMIC_ACQUIRE) <= 0) {
+        return 0;
+    }
     pthread_mutex_lock(&g_state_lock);
     for (int i = 0; i < g_kgsl_fd_count; i++) {
         if (g_kgsl_fds[i] == fd) {
@@ -515,21 +576,36 @@ static int is_kgsl_fd(int fd)
 
 static void untrack_kgsl_fd(int fd)
 {
-    if (fd < 0) return;
+    if (!is_kgsl_fd(fd)) {
+        return; /* Lock-free fast path for 99.99% of close() calls in QEMU */
+    }
     int found = 0;
+    if (fd < KGSL_FD_BITSET_MAX) {
+        uint64_t mask = (1ULL << (fd & 63));
+        uint64_t prev = __atomic_fetch_and(&g_kgsl_fd_bits[fd >> 6], ~mask, __ATOMIC_ACQ_REL);
+        found = (prev & mask) != 0;
+    }
     pthread_mutex_lock(&g_state_lock);
-    for (int i = 0; i < g_kgsl_fd_count; i++) {
-        if (g_kgsl_fds[i] == fd) {
-            g_kgsl_fds[i] = g_kgsl_fds[--g_kgsl_fd_count];
-            found = 1;
-            break;
+    if (fd >= KGSL_FD_BITSET_MAX) {
+        for (int i = 0; i < g_kgsl_fd_count; i++) {
+            if (g_kgsl_fds[i] == fd) {
+                g_kgsl_fds[i] = g_kgsl_fds[--g_kgsl_fd_count];
+                __atomic_sub_fetch(&g_kgsl_high_fd_count, 1, __ATOMIC_RELEASE);
+                found = 1;
+                break;
+            }
         }
     }
     if (found) {
+        int removed = 0;
         for (int i = 0; i < MAX_KGSL_BOS; i++) {
             if (g_kgsl_bos[i].in_use && g_kgsl_bos[i].fd == fd) {
                 g_kgsl_bos[i].in_use = 0;
+                removed++;
             }
+        }
+        if (removed > 0) {
+            __atomic_sub_fetch(&g_kgsl_bo_count, removed, __ATOMIC_RELEASE);
         }
     }
     pthread_mutex_unlock(&g_state_lock);
@@ -550,27 +626,46 @@ static void track_kgsl_bo(int fd, unsigned int id, uint64_t virtaddr, uint64_t s
         }
     }
     pthread_mutex_lock(&g_state_lock);
+    int free_slot = -1;
     for (int i = 0; i < MAX_KGSL_BOS; i++) {
-        if (!g_kgsl_bos[i].in_use || (g_kgsl_bos[i].fd == fd && g_kgsl_bos[i].id == id)) {
-            g_kgsl_bos[i].in_use = 1;
-            g_kgsl_bos[i].fd = fd;
-            g_kgsl_bos[i].id = id;
+        if (g_kgsl_bos[i].in_use && g_kgsl_bos[i].fd == fd && g_kgsl_bos[i].id == id) {
             g_kgsl_bos[i].virtaddr = virtaddr;
             g_kgsl_bos[i].gpuaddr = gpuaddr;
             g_kgsl_bos[i].size = size;
-            break;
+            pthread_mutex_unlock(&g_state_lock);
+            return;
         }
+        if (free_slot < 0 && !g_kgsl_bos[i].in_use) {
+            free_slot = i;
+        }
+    }
+    if (free_slot >= 0) {
+        g_kgsl_bos[free_slot].in_use = 1;
+        g_kgsl_bos[free_slot].fd = fd;
+        g_kgsl_bos[free_slot].id = id;
+        g_kgsl_bos[free_slot].virtaddr = virtaddr;
+        g_kgsl_bos[free_slot].gpuaddr = gpuaddr;
+        g_kgsl_bos[free_slot].size = size;
+        __atomic_add_fetch(&g_kgsl_bo_count, 1, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&g_state_lock);
 }
 
 static void untrack_kgsl_bo(int fd, unsigned int id)
 {
+    if (__atomic_load_n(&g_kgsl_bo_count, __ATOMIC_ACQUIRE) <= 0) {
+        return;
+    }
     pthread_mutex_lock(&g_state_lock);
+    int removed = 0;
     for (int i = 0; i < MAX_KGSL_BOS; i++) {
         if (g_kgsl_bos[i].in_use && g_kgsl_bos[i].fd == fd && g_kgsl_bos[i].id == id) {
             g_kgsl_bos[i].in_use = 0;
+            removed++;
         }
+    }
+    if (removed > 0) {
+        __atomic_sub_fetch(&g_kgsl_bo_count, removed, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&g_state_lock);
 }
@@ -578,6 +673,9 @@ static void untrack_kgsl_bo(int fd, unsigned int id)
 static void sync_kgsl_imported_bos(unsigned int op)
 {
     if (!g_real_ioctl || !g_cfg.cache_sync) {
+        return;
+    }
+    if (__atomic_load_n(&g_kgsl_bo_count, __ATOMIC_ACQUIRE) <= 0) {
         return;
     }
     struct kgsl_tracked_bo snap[MAX_KGSL_BOS];
@@ -589,6 +687,52 @@ static void sync_kgsl_imported_bos(unsigned int op)
         }
     }
     pthread_mutex_unlock(&g_state_lock);
+    if (n == 0) {
+        return;
+    }
+
+    int mode = __atomic_load_n(&g_kgsl_sync_mode, __ATOMIC_ACQUIRE);
+    if (mode != 2) {
+        /* Batch all BOs per KGSL fd into a single IOCTL_KGSL_GPUOBJ_SYNC syscall */
+        struct asoft_kgsl_gpuobj_sync_obj objs[MAX_KGSL_BOS];
+        int done[MAX_KGSL_BOS];
+        memset(done, 0, (size_t)n * sizeof(int));
+        int batch_failed_notty = 0;
+
+        for (int i = 0; i < n; i++) {
+            if (done[i]) continue;
+            int fd = snap[i].fd;
+            int count = 0;
+            for (int j = i; j < n; j++) {
+                if (!done[j] && snap[j].fd == fd) {
+                    done[j] = 1;
+                    objs[count].offset = 0;
+                    objs[count].length = snap[j].size;
+                    objs[count].id = snap[j].id;
+                    objs[count].op = op;
+                    count++;
+                }
+            }
+            struct asoft_kgsl_gpuobj_sync req = {
+                .objs = (uintptr_t)objs,
+                .obj_len = sizeof(objs[0]),
+                .count = (unsigned int)count
+            };
+            int rc = g_real_ioctl(fd, (int)IOCTL_KGSL_GPUOBJ_SYNC, &req);
+            if (rc == 0) {
+                if (mode == 0) {
+                    __atomic_store_n(&g_kgsl_sync_mode, 1, __ATOMIC_RELEASE);
+                }
+            } else if (errno == ENOTTY) {
+                __atomic_store_n(&g_kgsl_sync_mode, 2, __ATOMIC_RELEASE);
+                batch_failed_notty = 1;
+                break;
+            }
+        }
+        if (!batch_failed_notty) {
+            return;
+        }
+    }
 
     for (int i = 0; i < n; i++) {
         struct asoft_kgsl_gpumem_sync_cache sc;
@@ -598,16 +742,7 @@ static void sync_kgsl_imported_bos(unsigned int op)
         sc.op = op;
         sc.offset = 0;
         sc.length = (size_t)snap[i].size;
-        int rc = g_real_ioctl(snap[i].fd, (int)IOCTL_KGSL_GPUMEM_SYNC_CACHE, &sc);
-        if (rc < 0 && errno == ENOTTY) {
-            struct asoft_kgsl_gpuobj_sync_obj obj = {
-                .offset = 0, .length = snap[i].size, .id = snap[i].id, .op = op
-            };
-            struct asoft_kgsl_gpuobj_sync req = {
-                .objs = (uintptr_t)&obj, .obj_len = sizeof(obj), .count = 1
-            };
-            (void)g_real_ioctl(snap[i].fd, (int)IOCTL_KGSL_GPUOBJ_SYNC, &req);
-        }
+        (void)g_real_ioctl(snap[i].fd, (int)IOCTL_KGSL_GPUMEM_SYNC_CACHE, &sc);
     }
 }
 
@@ -814,8 +949,11 @@ int ioctl(int fd, int request, ...)
     if (kgsl && req_u == (unsigned int)IOCTL_KGSL_GPU_COMMAND && arg) {
         struct asoft_kgsl_gpu_command *cmd = (struct asoft_kgsl_gpu_command *)arg;
         uint64_t cseq = __atomic_add_fetch(&g_kgsl_cmd_count, 1, __ATOMIC_RELAXED);
-        if (g_cfg.cache_sync) {
-            sync_kgsl_imported_bos(KGSL_GPUMEM_CACHE_CLEAN);
+        if (!t_in_vk_submit) {
+            if (g_cfg.cache_sync) {
+                sync_kgsl_imported_bos(KGSL_GPUMEM_CACHE_CLEAN);
+            }
+            __atomic_add_fetch(&g_gpu_work_gen, 1, __ATOMIC_RELEASE);
         }
         if (g_cfg.verbose || cseq <= 200 || (cseq % 32ULL) == 0) {
             trace_logf("kgsl_cmd_pre #%llu ctx=%u cmds=%u objs=%u syncs=%u flags=0x%llx",
@@ -1059,30 +1197,22 @@ static void mask_features2_chain(VkPhysicalDeviceFeatures2 *f2)
     }
 }
 
+static pthread_mutex_t g_bounce_lock = PTHREAD_MUTEX_INITIALIZER;
+static int g_bounce_active_count = 0;
+
 static int find_host_coherent_mem_type(const VkPhysicalDeviceMemoryProperties *mp, uint32_t preferred_idx)
 {
-    if (!mp) return (int)preferred_idx;
-    if (preferred_idx < mp->memoryTypeCount) {
-        VkMemoryPropertyFlags pf = mp->memoryTypes[preferred_idx].propertyFlags;
-        if ((pf & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
-                == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-            return (int)preferred_idx;
-        }
+    if (!mp || mp->memoryTypeCount == 0) return (int)preferred_idx;
+    uint32_t flags[VK_MAX_MEMORY_TYPES];
+    uint32_t count = mp->memoryTypeCount < VK_MAX_MEMORY_TYPES ? mp->memoryTypeCount : VK_MAX_MEMORY_TYPES;
+    for (uint32_t i = 0; i < count; i++) {
+        flags[i] = (uint32_t)mp->memoryTypes[i].propertyFlags;
     }
-    int fallback = -1;
-    for (uint32_t i = 0; i < mp->memoryTypeCount; i++) {
-        VkMemoryPropertyFlags pf = mp->memoryTypes[i].propertyFlags;
-        VkMemoryPropertyFlags need = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        if ((pf & need) == need) {
-            if (pf & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) {
-                return (int)i;
-            }
-            if (fallback < 0) {
-                fallback = (int)i;
-            }
-        }
-    }
-    return fallback >= 0 ? fallback : (int)preferred_idx;
+    return asoft_select_bounce_mem_type(
+            flags, count, preferred_idx,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 }
 
 static uint32_t all_host_coherent_bits(const VkPhysicalDeviceMemoryProperties *mp)
@@ -1101,7 +1231,10 @@ static uint32_t all_host_coherent_bits(const VkPhysicalDeviceMemoryProperties *m
 
 static void sync_device_bounces(VkDevice dev, int to_shadow)
 {
-    pthread_mutex_lock(&g_state_lock);
+    if (__atomic_load_n(&g_bounce_active_count, __ATOMIC_ACQUIRE) <= 0) {
+        return; /* Zero-lock fast path when no allocations are bounced */
+    }
+    pthread_mutex_lock(&g_bounce_lock);
     for (int i = 0; i < MAX_BOUNCE_ALLOCS; i++) {
         if (!g_bounces[i].in_use) continue;
         if (dev != VK_NULL_HANDLE && g_bounces[i].device != dev) continue;
@@ -1111,7 +1244,7 @@ static void sync_device_bounces(VkDevice dev, int to_shadow)
             (void)asoft_bounce_sync_to_host(&g_bounces[i].region);
         }
     }
-    pthread_mutex_unlock(&g_state_lock);
+    pthread_mutex_unlock(&g_bounce_lock);
 }
 
 static struct bounce_alloc *find_bounce_locked(VkDeviceMemory mem)
@@ -1411,18 +1544,32 @@ static VKAPI_ATTR void VKAPI_CALL shim_vkDestroyDevice(
         real_unmap = de->unmap_mem;
         real_free = de->free_mem;
     }
-    for (int i = 0; i < MAX_BOUNCE_ALLOCS; i++) {
-        if (g_bounces[i].in_use && g_bounces[i].device == device) {
-            if (real_unmap && g_bounces[i].region.shadow_ptr) {
-                real_unmap(device, g_bounces[i].memory);
+    pthread_mutex_unlock(&g_state_lock);
+
+    if (__atomic_load_n(&g_bounce_active_count, __ATOMIC_ACQUIRE) > 0) {
+        pthread_mutex_lock(&g_bounce_lock);
+        int removed = 0;
+        for (int i = 0; i < MAX_BOUNCE_ALLOCS; i++) {
+            if (g_bounces[i].in_use && g_bounces[i].device == device) {
+                if (real_unmap && g_bounces[i].region.shadow_ptr) {
+                    real_unmap(device, g_bounces[i].memory);
+                }
+                if (real_free) {
+                    real_free(device, g_bounces[i].memory, NULL);
+                }
+                free(g_bounces[i].region.prev_ptr);
+                g_bounces[i].in_use = 0;
+                removed++;
             }
-            if (real_free) {
-                real_free(device, g_bounces[i].memory, NULL);
-            }
-            free(g_bounces[i].region.prev_ptr);
-            g_bounces[i].in_use = 0;
         }
+        if (removed > 0) {
+            __atomic_sub_fetch(&g_bounce_active_count, removed, __ATOMIC_RELEASE);
+        }
+        pthread_mutex_unlock(&g_bounce_lock);
     }
+
+    pthread_mutex_lock(&g_state_lock);
+    de = find_device(device);
     for (int i = 0; i < MAX_QUEUES; i++) {
         if (g_queues[i].in_use && g_queues[i].device == device) {
             g_queues[i].in_use = 0;
@@ -1526,7 +1673,7 @@ static VkResult perform_bounce_alloc(
     }
     memcpy(mapped, host_ptr, sz);
 
-    pthread_mutex_lock(&g_state_lock);
+    pthread_mutex_lock(&g_bounce_lock);
     int stored = 0;
     for (int i = 0; i < MAX_BOUNCE_ALLOCS; i++) {
         if (!g_bounces[i].in_use) {
@@ -1539,11 +1686,12 @@ static VkResult perform_bounce_alloc(
             g_bounces[i].region.size = sz;
             g_bounces[i].region.host_writable = host_writable;
             g_bounces[i].client_mapped = 0;
+            __atomic_add_fetch(&g_bounce_active_count, 1, __ATOMIC_RELEASE);
             stored = 1;
             break;
         }
     }
-    pthread_mutex_unlock(&g_state_lock);
+    pthread_mutex_unlock(&g_bounce_lock);
     if (!stored) {
         de_snap->unmap_mem(device, mem);
         de_snap->free_mem(device, mem, pAllocator);
@@ -1582,6 +1730,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_vkAllocateMemory(
     }
 
     if (!host_info || !host_info->pHostPointer) {
+        return de_snap.alloc_mem(device, pAllocateInfo, pAllocator, pMemory);
+    }
+
+    if (!g_cfg.multi_vma_bounce && !g_cfg.all_host_bounce && g_trace_path[0] == '\0') {
         return de_snap.alloc_mem(device, pAllocateInfo, pAllocator, pMemory);
     }
 
@@ -1643,14 +1795,20 @@ static VKAPI_ATTR void VKAPI_CALL shim_vkFreeMemory(
         real_free = de->free_mem;
         real_unmap = de->unmap_mem;
     }
-    struct bounce_alloc *ba = find_bounce_locked(memory);
-    if (ba) {
-        (void)asoft_bounce_sync_to_host(&ba->region);
-        prev_to_free = ba->region.prev_ptr;
-        ba->in_use = 0;
-        was_bounced = 1;
-    }
     pthread_mutex_unlock(&g_state_lock);
+
+    if (__atomic_load_n(&g_bounce_active_count, __ATOMIC_ACQUIRE) > 0) {
+        pthread_mutex_lock(&g_bounce_lock);
+        struct bounce_alloc *ba = find_bounce_locked(memory);
+        if (ba) {
+            (void)asoft_bounce_sync_to_host(&ba->region);
+            prev_to_free = ba->region.prev_ptr;
+            ba->in_use = 0;
+            __atomic_sub_fetch(&g_bounce_active_count, 1, __ATOMIC_RELEASE);
+            was_bounced = 1;
+        }
+        pthread_mutex_unlock(&g_bounce_lock);
+    }
 
     if (was_bounced && real_unmap) {
         real_unmap(device, memory);
@@ -1670,16 +1828,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_vkMapMemory(
         void **ppData)
 {
     (void)size;
-    pthread_mutex_lock(&g_state_lock);
-    struct bounce_alloc *ba = find_bounce_locked(memory);
-    if (ba) {
-        ba->client_mapped = 1;
-        if (ppData) {
-            *ppData = ba->region.host_ptr + offset;
+    if (__atomic_load_n(&g_bounce_active_count, __ATOMIC_ACQUIRE) > 0) {
+        pthread_mutex_lock(&g_bounce_lock);
+        struct bounce_alloc *ba = find_bounce_locked(memory);
+        if (ba) {
+            ba->client_mapped = 1;
+            if (ppData) {
+                *ppData = ba->region.host_ptr + offset;
+            }
+            pthread_mutex_unlock(&g_bounce_lock);
+            return VK_SUCCESS;
         }
-        pthread_mutex_unlock(&g_state_lock);
-        return VK_SUCCESS;
+        pthread_mutex_unlock(&g_bounce_lock);
     }
+    pthread_mutex_lock(&g_state_lock);
     struct device_entry *de = find_device(device);
     PFN_vkMapMemory real_map = de ? de->map_mem : NULL;
     pthread_mutex_unlock(&g_state_lock);
@@ -1691,19 +1853,26 @@ static VKAPI_ATTR void VKAPI_CALL shim_vkUnmapMemory(
         VkDevice device,
         VkDeviceMemory memory)
 {
-    pthread_mutex_lock(&g_state_lock);
-    struct bounce_alloc *ba = find_bounce_locked(memory);
-    if (ba) {
-        ba->client_mapped = 0;
-        (void)asoft_bounce_sync_to_shadow(&ba->region);
-        pthread_mutex_unlock(&g_state_lock);
-        return;
+    if (__atomic_load_n(&g_bounce_active_count, __ATOMIC_ACQUIRE) > 0) {
+        pthread_mutex_lock(&g_bounce_lock);
+        struct bounce_alloc *ba = find_bounce_locked(memory);
+        if (ba) {
+            ba->client_mapped = 0;
+            (void)asoft_bounce_sync_to_shadow(&ba->region);
+            pthread_mutex_unlock(&g_bounce_lock);
+            return;
+        }
+        pthread_mutex_unlock(&g_bounce_lock);
     }
+    pthread_mutex_lock(&g_state_lock);
     struct device_entry *de = find_device(device);
     PFN_vkUnmapMemory real_unmap = de ? de->unmap_mem : NULL;
     pthread_mutex_unlock(&g_state_lock);
     if (real_unmap) real_unmap(device, memory);
 }
+
+static uint64_t g_last_poll_fence_val = 0;
+static uint64_t g_last_poll_fence_gen = 0;
 
 static VKAPI_ATTR VkResult VKAPI_CALL shim_vkQueueSubmit(
         VkQueue queue,
@@ -1728,6 +1897,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_vkQueueSubmit(
 
     if (!real_fn) return VK_ERROR_DEVICE_LOST;
 
+    uint32_t total_signal_sems = 0;
+    if (pSubmits) {
+        for (uint32_t i = 0; i < submitCount; i++) {
+            total_signal_sems += pSubmits[i].signalSemaphoreCount;
+        }
+    }
+
     if (slock && g_cfg.submit_throttle) {
         pthread_mutex_lock(slock);
     }
@@ -1737,10 +1913,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_vkQueueSubmit(
     }
 
     uint64_t seq = __atomic_add_fetch(&g_vk_submit_seq, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&g_gpu_work_gen, 1, __ATOMIC_RELEASE);
     trace_logf("vkQueueSubmit_pre seq=%llu count=%u fence=%p", (unsigned long long)seq, submitCount, (void *)fence);
+    t_in_vk_submit = 1;
     VkResult res = real_fn(queue, submitCount, pSubmits, fence);
-    if (res == VK_SUCCESS && g_cfg.submit_throttle && real_wait_idle && fence == VK_NULL_HANDLE) {
-        /* If caller submitted without fence under throttle, drain to keep KGSL queue bounded */
+    t_in_vk_submit = 0;
+    if (res == VK_SUCCESS && g_cfg.submit_throttle && real_wait_idle
+            && asoft_submit_needs_throttle_drain(fence != VK_NULL_HANDLE, total_signal_sems)) {
+        /* Only drain truly unsynchronized submits (no fence and no signal semaphores) */
         (void)real_wait_idle(queue);
         sync_device_bounces(dev, 0);
     }
@@ -1776,6 +1956,14 @@ static VkResult submit2_common(
     pthread_mutex_unlock(&g_state_lock);
 
     if (!real_fn) return VK_ERROR_DEVICE_LOST;
+
+    uint32_t total_signal_sems = 0;
+    if (pSubmits) {
+        for (uint32_t i = 0; i < submitCount; i++) {
+            total_signal_sems += pSubmits[i].signalSemaphoreInfoCount;
+        }
+    }
+
     if (slock && g_cfg.submit_throttle) {
         pthread_mutex_lock(slock);
     }
@@ -1784,9 +1972,13 @@ static VkResult submit2_common(
         sync_kgsl_imported_bos(KGSL_GPUMEM_CACHE_CLEAN);
     }
     uint64_t seq = __atomic_add_fetch(&g_vk_submit_seq, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&g_gpu_work_gen, 1, __ATOMIC_RELEASE);
     trace_logf("vkQueueSubmit2_pre seq=%llu count=%u fence=%p", (unsigned long long)seq, submitCount, (void *)fence);
+    t_in_vk_submit = 1;
     VkResult res = real_fn(queue, submitCount, pSubmits, fence);
-    if (res == VK_SUCCESS && g_cfg.submit_throttle && real_wait_idle && fence == VK_NULL_HANDLE) {
+    t_in_vk_submit = 0;
+    if (res == VK_SUCCESS && g_cfg.submit_throttle && real_wait_idle
+            && asoft_submit_needs_throttle_drain(fence != VK_NULL_HANDLE, total_signal_sems)) {
         (void)real_wait_idle(queue);
         sync_device_bounces(dev, 0);
     }
@@ -1856,8 +2048,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL shim_vkGetFenceStatus(VkDevice device, VkF
     if (!real_fn) return VK_ERROR_DEVICE_LOST;
     VkResult res = real_fn(device, fence);
     if (res == VK_SUCCESS) {
-        if (g_cfg.cache_sync) sync_kgsl_imported_bos(KGSL_GPUMEM_CACHE_FROM_GPU);
-        sync_device_bounces(device, 0);
+        uint64_t fval = (uint64_t)(uintptr_t)fence;
+        uint64_t gen = __atomic_load_n(&g_gpu_work_gen, __ATOMIC_ACQUIRE);
+        if (fval != __atomic_load_n(&g_last_poll_fence_val, __ATOMIC_ACQUIRE)
+                || gen != __atomic_load_n(&g_last_poll_fence_gen, __ATOMIC_ACQUIRE)) {
+            if (g_cfg.cache_sync) sync_kgsl_imported_bos(KGSL_GPUMEM_CACHE_FROM_GPU);
+            sync_device_bounces(device, 0);
+            __atomic_store_n(&g_last_poll_fence_val, fval, __ATOMIC_RELEASE);
+            __atomic_store_n(&g_last_poll_fence_gen, gen, __ATOMIC_RELEASE);
+        }
     }
     return res;
 }
