@@ -2100,36 +2100,6 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    private void showPairCodeDialog() {
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(22), dp(8), dp(22), 0);
-        android.widget.EditText codeInput = new android.widget.EditText(this);
-        codeInput.setHint("6-digit code");
-        codeInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        form.addView(codeInput);
-        android.widget.EditText portInput = new android.widget.EditText(this);
-        int found = WadbPairService.detectedPort();
-        portInput.setHint(found > 0 ? "Port (auto: " + found + ")" : "Port (e.g. 37215 if not auto-detected)");
-        if (found > 0) {
-            portInput.setText(String.valueOf(found));
-        }
-        portInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        form.addView(portInput);
-        new AlertDialog.Builder(this)
-                .setTitle("Enter Wireless debugging code")
-                .setMessage("Tip: in Split-Screen you can keep Settings' pairing dialog open beside ASoftware iOS so its code stays valid.")
-                .setView(form)
-                .setPositiveButton("Pair", (d, w) -> {
-                    String c = codeInput.getText().toString().trim();
-                    String p = portInput.getText().toString().trim();
-                    WadbPairService.submitFromUi(this, p.isEmpty() ? c : c + " " + p);
-                    Toast.makeText(this, "Pairing started… check notification or Settings.", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
     private void startPairing() {
         // the code goes into a notification: Android 13 and later ask the user for those first
         if (android.os.Build.VERSION.SDK_INT >= 33
