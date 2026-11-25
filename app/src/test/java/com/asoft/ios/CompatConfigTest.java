@@ -153,4 +153,25 @@ public class CompatConfigTest {
         CompatConfig.setCompatRunActive(false);
         assertFalse(CompatConfig.isSyncLogActive(null));
     }
+
+    @Test
+    public void enforceRequiredLocksProtectionsOnAffectedKgslGpu() {
+        CompatConfig.Config allOff = CompatConfig.Config.safeDefaults();
+        allOff.vanillaFallback = true;
+        CompatConfig.enforceRequired(allOff, true);
+        assertFalse(allOff.vanillaFallback);
+        assertTrue(allOff.multiVmaBounce);
+        assertTrue(allOff.kgslCacheSync);
+        assertTrue(allOff.featureGuard);
+        assertTrue(allOff.submitThrottle);
+        assertFalse(allOff.kgslTrace);
+        assertFalse(allOff.syncLogging);
+        assertFalse(allOff.lazySurfacesOff);
+
+        CompatConfig.Config unaffected = CompatConfig.Config.safeDefaults();
+        unaffected.vanillaFallback = true;
+        CompatConfig.enforceRequired(unaffected, false);
+        assertTrue(unaffected.vanillaFallback);
+        assertFalse(unaffected.multiVmaBounce);
+    }
 }

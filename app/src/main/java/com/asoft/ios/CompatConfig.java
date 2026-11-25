@@ -116,6 +116,40 @@ final class CompatConfig {
         }
     }
 
+    /**
+     * True when the device's GPU check identified a Snapdragon/KGSL GPU running Turnip compatibility
+     * mode (affected by Upstream Issue #92 kernel freezes when host-pointer mitigations are disabled).
+     */
+    static boolean isAffectedKgslGpu(Context c) {
+        if (c == null) {
+            return false;
+        }
+        GpuPass gpu = GpuCheck.forStart(c);
+        if (gpu != null && gpu.any) {
+            return gpu.noSparse && !gpu.system;
+        }
+        GpuCheck.Result r = GpuCheck.dir(c).isDirectory() ? GpuCheck.last(c) : null;
+        return r != null && r.pass && r.nosparse && !GpuCheck.systemDriver(c);
+    }
+
+    /**
+     * Enforces the four core Issue #92 KGSL freeze protections on affected Snapdragon GPUs so users
+     * cannot accidentally disable them and trigger an Android kernel freeze / device reboot.
+     */
+    static Config enforceRequired(Config cfg, boolean affectedKgsl) {
+        if (cfg == null) {
+            cfg = Config.safeDefaults();
+        }
+        if (affectedKgsl) {
+            cfg.vanillaFallback = false;
+            cfg.multiVmaBounce = true;
+            cfg.kgslCacheSync = true;
+            cfg.featureGuard = true;
+            cfg.submitThrottle = true;
+        }
+        return cfg;
+    }
+
     static Config load(Context c) {
         if (c == null) {
             return Config.safeDefaults();
@@ -134,26 +168,27 @@ final class CompatConfig {
         cfg.importThreadAlways = p.getBoolean(KEY_IMPORT_THREAD_ALWAYS, false);
         cfg.tuDebugSafe = p.getBoolean(KEY_TU_DEBUG_SAFE, false);
         cfg.verboseEngineLogs = p.getBoolean(KEY_VERBOSE_ENGINE_LOGS, false);
-        return cfg;
+        return enforceRequired(cfg, isAffectedKgslGpu(c));
     }
 
     static void save(Context c, Config cfg) {
         if (c == null || cfg == null) {
             return;
         }
+        Config safe = enforceRequired(cfg.copy(), isAffectedKgslGpu(c));
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putBoolean(KEY_VANILLA_FALLBACK, cfg.vanillaFallback)
-                .putBoolean(KEY_KGSL_TRACE, cfg.kgslTrace)
-                .putBoolean(KEY_SYNC_LOGGING, cfg.syncLogging)
-                .putBoolean(KEY_MULTI_VMA_BOUNCE, cfg.multiVmaBounce)
-                .putBoolean(KEY_KGSL_CACHE_SYNC, cfg.kgslCacheSync)
-                .putBoolean(KEY_FEATURE_GUARD, cfg.featureGuard)
-                .putBoolean(KEY_SUBMIT_THROTTLE, cfg.submitThrottle)
-                .putBoolean(KEY_LAZY_SURFACES_OFF, cfg.lazySurfacesOff)
-                .putBoolean(KEY_ALL_HOST_BOUNCE, cfg.allHostBounce)
-                .putBoolean(KEY_IMPORT_THREAD_ALWAYS, cfg.importThreadAlways)
-                .putBoolean(KEY_TU_DEBUG_SAFE, cfg.tuDebugSafe)
-                .putBoolean(KEY_VERBOSE_ENGINE_LOGS, cfg.verboseEngineLogs)
+                .putBoolean(KEY_VANILLA_FALLBACK, safe.vanillaFallback)
+                .putBoolean(KEY_KGSL_TRACE, safe.kgslTrace)
+                .putBoolean(KEY_SYNC_LOGGING, safe.syncLogging)
+                .putBoolean(KEY_MULTI_VMA_BOUNCE, safe.multiVmaBounce)
+                .putBoolean(KEY_KGSL_CACHE_SYNC, safe.kgslCacheSync)
+                .putBoolean(KEY_FEATURE_GUARD, safe.featureGuard)
+                .putBoolean(KEY_SUBMIT_THROTTLE, safe.submitThrottle)
+                .putBoolean(KEY_LAZY_SURFACES_OFF, safe.lazySurfacesOff)
+                .putBoolean(KEY_ALL_HOST_BOUNCE, safe.allHostBounce)
+                .putBoolean(KEY_IMPORT_THREAD_ALWAYS, safe.importThreadAlways)
+                .putBoolean(KEY_TU_DEBUG_SAFE, safe.tuDebugSafe)
+                .putBoolean(KEY_VERBOSE_ENGINE_LOGS, safe.verboseEngineLogs)
                 .commit();
     }
 

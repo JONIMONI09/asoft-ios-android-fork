@@ -2095,6 +2095,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCompat26Dialog() {
+        final boolean affectedKgsl = CompatConfig.isAffectedKgslGpu(this);
         CompatConfig.Config cfg = CompatConfig.load(this).copy();
         final String[] labels = {
                 "Vanilla 0.1.7 fallback (disable all shims/overrides)",
@@ -2143,14 +2144,54 @@ public class MainActivity extends Activity {
         helpBtn.setTypeface(Typeface.DEFAULT_BOLD);
         titleRow.addView(helpBtn);
 
+        LinearLayout listBox = new LinearLayout(this);
+        listBox.setOrientation(LinearLayout.VERTICAL);
+        listBox.setPadding(dp(20), dp(8), dp(20), dp(8));
+        if (affectedKgsl) {
+            GpuCheck.Result r = GpuCheck.dir(this).isDirectory() ? GpuCheck.last(this) : null;
+            String gpuName = (r != null && r.gpu != null && !r.gpu.isEmpty()) ? r.gpu : "Snapdragon / KGSL";
+            TextView lockBanner = new TextView(this);
+            lockBanner.setText("Affected GPU detected (" + gpuName + "): Required Issue #92 freeze protections "
+                    + "are locked ON (greyed out) to prevent Android kernel freezes and device reboots.");
+            lockBanner.setTextSize(12);
+            lockBanner.setTextColor(0xffb45309);
+            lockBanner.setPadding(0, 0, 0, dp(10));
+            listBox.addView(lockBanner);
+        }
+
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            boolean lockedOn = affectedKgsl && (i == 3 || i == 4 || i == 5 || i == 6);
+            boolean lockedOff = affectedKgsl && i == 0;
+            android.widget.CheckBox cb = new android.widget.CheckBox(this);
+            cb.setText(lockedOn ? labels[i] + " [Required — locked ON]"
+                    : lockedOff ? labels[i] + " [Locked OFF for this GPU]"
+                    : labels[i]);
+            cb.setTextSize(14);
+            cb.setChecked(lockedOn || (!lockedOff && checked[i]));
+            checked[i] = cb.isChecked();
+            if (lockedOn || lockedOff) {
+                cb.setEnabled(false);
+                cb.setAlpha(0.55f);
+            } else {
+                cb.setOnCheckedChangeListener((btn, isChecked) -> {
+                    checked[idx] = isChecked;
+                    if (isChecked) {
+                        showCompat26OptionInfo(cb, labels[idx], idx, checked);
+                    }
+                });
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = dp(4);
+            listBox.addView(cb, lp);
+        }
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(listBox);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setCustomTitle(titleRow)
-                .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> {
-                    checked[which] = isChecked;
-                    if (isChecked) {
-                        showCompat26OptionInfo((AlertDialog) d, labels[which], which, checked);
-                    }
-                })
+                .setView(scroll)
                 .setPositiveButton("Save", (d, w) -> {
                     cfg.vanillaFallback = checked[0];
                     cfg.kgslTrace = checked[1];
@@ -2169,10 +2210,12 @@ public class MainActivity extends Activity {
                     showSettings();
                     Toast.makeText(this, "Applies on next iOS 26 start", Toast.LENGTH_SHORT).show();
                 })
-                .setNeutralButton("Reset (all off)", (d, w) -> {
+                .setNeutralButton(affectedKgsl ? "Reset optional" : "Reset (all off)", (d, w) -> {
                     CompatConfig.resetDefaults(this);
                     showSettings();
-                    Toast.makeText(this, "Defaults restored (all off)", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, affectedKgsl
+                            ? "Optional toggles reset (required KGSL protections kept ON)"
+                            : "Defaults restored (all off)", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -2189,12 +2232,12 @@ public class MainActivity extends Activity {
                     : (r != null && r.driver != null && !r.driver.isEmpty()) ? r.driver : "this GPU";
             Toast.makeText(this, compat
                     ? "Auto-selected fast setup-safe Snapdragon preset for " + gpuName
-                            + " (lazy IOSurface ON, trace/O_SYNC OFF)"
+                            + " (required protections locked ON, trace/O_SYNC OFF)"
                     : "Auto-selected stock defaults (all off) for " + gpuName, Toast.LENGTH_LONG).show();
         });
     }
 
-    private void showCompat26OptionInfo(AlertDialog parent, String title, int which, boolean[] checked) {
+    private void showCompat26OptionInfo(android.widget.CheckBox cb, String title, int which, boolean[] checked) {
         String msg = compat26OptionDescription(which)
                 + "\n\nIf you are not sure what this setting does, leave it OFF.";
         new AlertDialog.Builder(this)
@@ -2203,8 +2246,8 @@ public class MainActivity extends Activity {
                 .setPositiveButton("OK (keep ON)", null)
                 .setNegativeButton("Turn OFF", (d, w) -> {
                     checked[which] = false;
-                    if (parent != null && parent.getListView() != null) {
-                        parent.getListView().setItemChecked(which, false);
+                    if (cb != null) {
+                        cb.setChecked(false);
                     }
                 })
                 .show();
