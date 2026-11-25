@@ -142,7 +142,7 @@
    - Added `CompatConfig.isAffectedKgslGpu(Context)` and `CompatConfig.enforceRequired(Config, boolean)` enforced on every `load()`, `save()`, and `resetDefaults()`.
    - When an affected Snapdragon/KGSL compatibility-mode GPU is detected (e.g., SM8650 / Adreno 750), `multiVmaBounce`, `kgslCacheSync`, `featureGuard`, and `submitThrottle` are permanently locked ON (and `vanillaFallback` locked OFF) and shown disabled/greyed out in `iOS 26 GPU compatibility (#92)` so users cannot accidentally disable them and trigger an Android kernel freeze/reboot.
 8. **Reliable On-Open Update Check & Automatic APK Cache Cleanup (`UpdateCheck.java`, `ApkUpdater.java`, `MainActivity.java`):**
-   - Moved `UpdateCheck.checkOnStart()` into `MainActivity.onStart()` so a fresh update check runs once every single time the app is opened (both cold launch and returning from background), with an in-flight guard (`checking`) and automatic throttle reset if a check fails offline.
+   - Moved `UpdateCheck.checkOnStart()` into `MainActivity.onStart()` and also trigger it in `MainActivity.follow` whenever a running emulator stops/closes, with an in-flight guard (`checking`) and automatic throttle reset if a check fails offline.
    - Defaulted `UpdateCheck.useForkChannel()` to `true` on `-advanced-*` Fork CI builds when no explicit channel preference has been saved yet.
    - Automatically clears all leftover `.apk` / `.apk.part` files in the update cache via `ApkUpdater.clearCache()` on every fresh app launch (`MainActivity.onCreate()`).
 9. **Interactive Save Manager, Floating iOS Live Terminal & Full Reboot-Safe Settings (`LiveTerminalDialog.java`, `ic_bar_terminal.xml`, `Guest.java`, `MainActivity.java`, `ScreenActivity.java`):**
