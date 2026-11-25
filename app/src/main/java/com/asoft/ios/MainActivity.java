@@ -120,11 +120,17 @@ public class MainActivity extends Activity {
      * the pairing (WadbPairService). Only a change draws the panels again: their saves come from qemu-img.
      */
     private String shown = "";
+    private boolean wasGuestRunning;
     private final Runnable follow = new Runnable() {
         @Override
         public void run() {
+            boolean guestUp = Guest.running();
+            if (wasGuestRunning && !guestUp) {
+                UpdateCheck.checkOnStart(MainActivity.this, MainActivity.this::showUpdate);
+            }
+            wasGuestRunning = guestUp;
             // (a crash record comes a moment after QEMU's end, from its own thread: its notice counts as a change)
-            String now = Guest.running() + " " + Guest.state + " " + Guest.os(MainActivity.this) + " " + Guest.saving() + " "
+            String now = guestUp + " " + Guest.state + " " + Guest.os(MainActivity.this) + " " + Guest.saving() + " "
                     + SetupService.busy() + " " + SetupService.state.step + SetupService.state.pct
                     + SetupService.state.paused + SetupService.state.pausing + SetupService.state.pauseAfterStep + " "
                     + Guest.startError + " " + CrashReport.pendingKey(MainActivity.this);
