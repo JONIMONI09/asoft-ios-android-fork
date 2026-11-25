@@ -69,14 +69,14 @@ final class CompatConfig {
         }
 
         /**
-         * Setup-safe recommended preset for known Issue #92 Snapdragon/KGSL GPUs.
-         * Keeps lazySurfacesOff = false so reims keeps lazy IOSurface reparking enabled and stays
-         * under Android's 65,530 vm.max_map_count limit during iOS 26 DataMigration.
+         * Setup-safe & fast daily preset for known Issue #92 Snapdragon/KGSL GPUs.
+         * Keeps lazySurfacesOff = false (prevents 65,530 vm.max_map_count crashes) and keeps
+         * kgslTrace / syncLogging = false (avoids per-GPU-submit flash fsync overhead).
          */
         static Config recommendedForKnownKgslBug() {
             Config c = new Config();
-            c.kgslTrace = true;
-            c.syncLogging = true;
+            c.kgslTrace = false;
+            c.syncLogging = false;
             c.multiVmaBounce = true;
             c.kgslCacheSync = true;
             c.featureGuard = true;
