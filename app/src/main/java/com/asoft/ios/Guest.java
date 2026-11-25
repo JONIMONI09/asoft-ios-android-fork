@@ -573,16 +573,28 @@ final class Guest {
      * cold Settings from 5.5 to 27 s but left ~1.3 GB more to Android, WATCHOS.md). A save always loads with
      * the RAM it was made with (savedRam), so a new size takes effect at the next full start.
      */
-    static final int[] RAM_CHOICES_26 = {3072, 4096, 6144}, RAM_CHOICES_WATCH = {2048, 3072},
+    static final int[] RAM_CHOICES_26 = {3072, 4096, 6144},
+            RAM_CHOICES_26_HIGH_MEM = {3072, 4096, 6144, 8192},
+            RAM_CHOICES_WATCH = {2048, 3072},
             RAM_CHOICES_16 = {2048, 3072, 4096};
+    /** Minimum physical RAM (14 GB) before offering 8 GB guest RAM for iOS 26. */
+    static final long HIGH_RAM_DEVICE_BYTES = 14_000_000_000L;
 
     /** The memory sizes (MiB) offered for @forOs. */
     static int[] ramChoices(int forOs) {
         return forOs == IOS16 ? RAM_CHOICES_16 : forOs == WATCH ? RAM_CHOICES_WATCH : RAM_CHOICES_26;
     }
+
+    /** Device-aware memory sizes (MiB): unlocks 8 GB for iOS 26 on 16 GB+ devices (with warning). */
+    static int[] ramChoices(Context c, int forOs) {
+        if (forOs == IOS26 && c != null && GpuCheck.ram(c) >= HIGH_RAM_DEVICE_BYTES) {
+            return RAM_CHOICES_26_HIGH_MEM;
+        }
+        return ramChoices(forOs);
+    }
     /** Above this Android has so little left that it may close the guest: MainActivity.chooseRam warns. */
     static final int RAM_TIGHT = 4096;
-    // 6 GB needs qemu-sptm asoft-android 6c733cf or later: from 5 GB of RAM vresearch's framebuffer goes past the end
+    // 6 GB+ needs qemu-sptm asoft-android 6c733cf or later: from 5 GB of RAM vresearch's framebuffer goes past the end
     // of RAM. A save made below 5 GB keeps the old address, 0x1c0000000, so it still loads.
 
     static int ramDefault(Context c, int forOs) {
@@ -595,7 +607,7 @@ final class Guest {
 
     static int ramMiB(Context c, int forOs) {
         int mib = c.getSharedPreferences("guest", Context.MODE_PRIVATE).getInt(ramKey(forOs), ramDefault(c, forOs));
-        for (int ok : ramChoices(forOs)) {
+        for (int ok : ramChoices(c, forOs)) {
             if (ok == mib) {
                 return mib;
             }

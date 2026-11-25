@@ -1850,12 +1850,13 @@ public class MainActivity extends Activity {
      * size takes effect at the next full start.
      */
     private void chooseRam(int os) {
-        int[] ch = Guest.ramChoices(os);
+        int[] ch = Guest.ramChoices(this, os);
         int now = Guest.ramMiB(this, os), def = Guest.ramDefault(this, os);
         String[] names = new String[ch.length];
         int pick = 0;
         for (int i = 0; i < ch.length; i++) {
             names[i] = ch[i] / 1024 + " GB" + (ch[i] == def ? " (default for this phone)"
+                    : ch[i] >= 8192 ? " (high-RAM experimental — clean RAM first, ~7 GB saves)"
                     : (os == Guest.IOS16 ? ch[i] > def : ch[i] > Guest.RAM_TIGHT) ? " (Android may close iOS)" : "");
             if (ch[i] == now) {
                 pick = i;

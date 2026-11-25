@@ -23,27 +23,109 @@ import java.io.File;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * Floating-bar live iOS/QEMU terminal log viewer with text & date filtering and live follow toggle.
- * Helps diagnose black-screen boots and crashes directly from ScreenActivity without leaving iOS.
+ * Floating-bar live iOS/QEMU/App terminal log viewer with text & date filtering and live follow toggle.
+ * Exposes every log file available in the app, explains when a log is disabled by settings
+ * (e.g. qemu.log or kgsl-trace.txt), performs all file I/O and filtering off the UI thread to prevent ANRs,
+ * and does zero work when closed or paused.
  */
 final class LiveTerminalDialog {
-    private static final int MAX_TAIL_BYTES = 96 * 1024;
-    private static final long POLL_MS = 1000L;
+    private static final int MAX_TAIL_BYTES = 48 * 1024;
+    private static final long POLL_MS = 1200L;
 
-    private static final int SRC_SERIAL = 0;
-    private static final int SRC_STDERR = 1;
-    private static final int SRC_APP = 2;
+    private static final class Source {
+        final String label;
+        final File primary;
+        final File fallback;
+        final String disabledNotice;
+
+        Source(String label, File primary, File fallback, String disabledNotice) {
+            this.label = label;
+            this.primary = primary;
+            this.fallback = fallback;
+            this.disabledNotice = disabledNotice;
+        }
+
+        File resolve() {
+            if (primary != null && primary.isFile() && primary.length() > 0) {
+                return primary;
+            }
+            if (fallback != null && fallback.isFile() && fallback.length() > 0) {
+                return fallback;
+            }
+            return primary != null ? primary : fallback;
+        }
+    }
 
     private LiveTerminalDialog() {}
+
+    private static List<Source> buildSources(Activity a) {
+        File run = Guest.runDir(a);
+        File logDir = AppLog.dir(a);
+        PerfConfig perf = PerfConfig.load(a);
+        CompatConfig.Config compat = CompatConfig.load(a);
+
+        List<Source> list = new ArrayList<>();
+        list.add(new Source("iOS Serial (serial.txt)",
+                new File(run, "serial.txt"), new File(logDir, "last-serial.txt"), null));
+        list.add(new Source("App log (app.txt)",
+                new File(run, "app.txt"), new File(logDir, "app.txt"), null));
+        list.add(new Source("QEMU stderr (qemu-stderr.txt)",
+                new File(run, "qemu-stderr.txt"), new File(logDir, "last-qemu-stderr.txt"), null));
+        list.add(new Source("QEMU guest errors (qemu.log)",
+                new File(run, "qemu.log"), null,
+                perf.disableQemuLog
+                        ? "[Disabled by setting]\nQEMU guest_errors log (-d off) is turned OFF in Advanced performance… for better speed.\nRe-enable it there if you want qemu.log recorded."
+                        : null));
+        list.add(new Source("QEMU command line (cmdline.txt)",
+                new File(run, "cmdline.txt"), null, null));
+        list.add(new Source("KGSL & Vulkan shim trace (kgsl-trace.txt)",
+                new File(run, CompatConfig.TRACE_FILE), new File(logDir, "last-" + CompatConfig.TRACE_FILE),
+                !compat.kgslTrace
+                        ? "[Disabled by setting]\nKGSL crash trace is turned OFF in Settings > iOS 26 GPU compatibility (#92) for maximum performance.\nEnable it there only when diagnosing GPU issues."
+                        : null));
+        list.add(new Source("Boot & stall diagnostics (boot-diag.txt)",
+                new File(run, BootDiagnostics.FILE_NAME), new File(logDir, "last-" + BootDiagnostics.FILE_NAME), null));
+        list.add(new Source("UI Freeze / ANR log (last-ui-freeze.txt)",
+                new File(run, FreezeWatchdog.FILE_NAME), null, null));
+        list.add(new Source("App crash log (last-app-crash.txt)",
+                new File(run, CrashHandler.CRASH_FILE), null, null));
+        list.add(new Source("Engine test log (el0bench.log)",
+                new File(a.getExternalFilesDir(null), EngineService.LOG), null, null));
+        list.add(new Source("Previous run: iOS Serial",
+                new File(logDir, "last-serial.txt"), null, null));
+        list.add(new Source("Previous run: QEMU stderr",
+                new File(logDir, "last-qemu-stderr.txt"), null, null));
+
+        // Include any kept setup logs from RunLogs
+        File[] kept = new File(PhoneSetup26.work(a), "phone/logs").listFiles();
+        if (kept != null) {
+            for (File f : kept) {
+                if (f.isFile() && f.length() > 0 && f.getName().endsWith(".txt")) {
+                    list.add(new Source("Setup: " + f.getName(), f, null, null));
+                }
+            }
+        }
+        return list;
+    }
 
     static void show(Activity a) {
         if (a == null || a.isFinishing() || a.isDestroyed()) {
             return;
         }
+        final List<Source> sources = buildSources(a);
+        String[] labels = new String[sources.size()];
+        for (int i = 0; i < sources.size(); i++) {
+            labels[i] = sources.get(i).label;
+        }
+
         float d = a.getResources().getDisplayMetrics().density;
         int dp8 = Math.round(8 * d);
         int dp12 = Math.round(12 * d);
@@ -57,8 +139,7 @@ final class LiveTerminalDialog {
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
         Spinner spSource = new Spinner(a);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(a, android.R.layout.simple_spinner_item,
-                new String[]{"iOS Serial (serial.txt)", "QEMU stderr", "App log (app.txt)"});
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(a, android.R.layout.simple_spinner_item, labels);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spSource.setAdapter(adapter);
         topRow.addView(spSource, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -76,7 +157,7 @@ final class LiveTerminalDialog {
         filterRow.setGravity(Gravity.CENTER_VERTICAL);
 
         EditText etSearch = new EditText(a);
-        etSearch.setHint("Search text (e.g. panic, AMFI)");
+        etSearch.setHint("Search (e.g. input:, panic)");
         etSearch.setSingleLine(true);
         etSearch.setTextSize(13);
         filterRow.addView(etSearch, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f));
@@ -100,13 +181,11 @@ final class LiveTerminalDialog {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(filterRow);
 
-        // Status line (file name, size, matched lines)
         TextView tvMeta = new TextView(a);
         tvMeta.setTextSize(11);
         tvMeta.setPadding(0, dp8 / 2, 0, dp8 / 2);
         root.addView(tvMeta);
 
-        // Monospace dark terminal output pane
         ScrollView scroll = new ScrollView(a);
         scroll.setBackgroundColor(0xff111418);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
@@ -121,49 +200,70 @@ final class LiveTerminalDialog {
         root.addView(scroll, slp);
 
         final Handler handler = new Handler(Looper.getMainLooper());
+        final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "live-terminal-io");
+            t.setDaemon(true);
+            return t;
+        });
         final boolean[] closed = {false};
-        final int[] source = {SRC_SERIAL};
+        final int[] selIndex = {0};
         final long[] lastLen = {-1L};
         final long[] lastMod = {-1L};
         final String[] lastRaw = {""};
+        final int[] gen = {0};
 
-        Runnable renderFiltered = () -> {
-            String query = etSearch.getText().toString().trim().toLowerCase(Locale.ROOT);
-            String dateFilter = etDate.getText().toString().trim().toLowerCase(Locale.ROOT);
-            String raw = lastRaw[0];
-            String shown = filterLines(raw, query, dateFilter);
-            int totalLines = countLines(raw);
-            int shownLines = countLines(shown);
-            File f = resolveFile(a, source[0]);
-            String fname = f != null ? f.getName() : "none";
-            long sz = (f != null && f.isFile()) ? f.length() : 0L;
-            tvMeta.setText(String.format(Locale.ROOT,
-                    "%s (%.1f KB) · showing %d / %d lines%s",
-                    fname, sz / 1024.0, shownLines, totalLines,
-                    cbLive.isChecked() ? " · LIVE" : " · PAUSED"));
-            tvLog.setText(shown.isEmpty() ? "(no matching lines yet)" : shown);
-            if (cbLive.isChecked()) {
-                scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
-            }
-        };
-
-        Runnable loadOnce = () -> new Thread(() -> {
-            File f = resolveFile(a, source[0]);
-            long len = (f != null && f.isFile()) ? f.length() : -1L;
-            long mod = (f != null && f.isFile()) ? f.lastModified() : -1L;
-            if (len == lastLen[0] && mod == lastMod[0] && !lastRaw[0].isEmpty()) {
+        Runnable refreshAsync = () -> {
+            if (closed[0]) {
                 return;
             }
-            String text = readTail(f, MAX_TAIL_BYTES);
-            lastLen[0] = len;
-            lastMod[0] = mod;
-            lastRaw[0] = text;
-            a.runOnUiThread(() -> {
-                if (!closed[0] && !a.isFinishing() && !a.isDestroyed()) {
-                    renderFiltered.run();
+            final int myGen = ++gen[0];
+            final Source src = sources.get(selIndex[0]);
+            final String q = etSearch.getText().toString().trim().toLowerCase(Locale.ROOT);
+            final String dt = etDate.getText().toString().trim().toLowerCase(Locale.ROOT);
+            final boolean live = cbLive.isChecked();
+            worker.execute(() -> {
+                if (closed[0] || myGen != gen[0]) {
+                    return;
                 }
+                File f = src.resolve();
+                long len = (f != null && f.isFile()) ? f.length() : 0L;
+                long mod = (f != null && f.isFile()) ? f.lastModified() : 0L;
+                if (len != lastLen[0] || mod != lastMod[0]) {
+                    lastLen[0] = len;
+                    lastMod[0] = mod;
+                    lastRaw[0] = len > 0 ? readTail(f, MAX_TAIL_BYTES) : "";
+                }
+                String raw = lastRaw[0];
+                String displayText;
+                int totalLines = countLines(raw);
+                int shownLines;
+                if (raw.isEmpty() && src.disabledNotice != null) {
+                    displayText = src.disabledNotice;
+                    shownLines = 0;
+                } else {
+                    String filtered = filterLines(raw, q, dt);
+                    shownLines = countLines(filtered);
+                    displayText = filtered.isEmpty()
+                            ? (raw.isEmpty() ? "(log file is empty or not created yet)" : "(no lines match the current filter)")
+                            : filtered;
+                }
+                String fname = f != null ? f.getName() : "none";
+                String meta = String.format(Locale.ROOT,
+                        "%s (%.1f KB) · showing %d / %d lines%s",
+                        fname, len / 1024.0, shownLines, totalLines,
+                        live ? " · LIVE" : " · PAUSED");
+                a.runOnUiThread(() -> {
+                    if (closed[0] || a.isFinishing() || a.isDestroyed() || myGen != gen[0]) {
+                        return;
+                    }
+                    tvMeta.setText(meta);
+                    tvLog.setText(displayText);
+                    if (live) {
+                        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+                    }
+                });
             });
-        }, "live-terminal-read").start();
+        };
 
         final Runnable[] pollTask = new Runnable[1];
         pollTask[0] = () -> {
@@ -171,19 +271,19 @@ final class LiveTerminalDialog {
                 return;
             }
             if (cbLive.isChecked()) {
-                loadOnce.run();
+                refreshAsync.run();
+                handler.postDelayed(pollTask[0], POLL_MS);
             }
-            handler.postDelayed(pollTask[0], POLL_MS);
         };
 
         spSource.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                source[0] = pos;
+                selIndex[0] = pos;
                 lastLen[0] = -1L;
                 lastMod[0] = -1L;
                 lastRaw[0] = "";
-                loadOnce.run();
+                refreshAsync.run();
             }
 
             @Override
@@ -194,15 +294,16 @@ final class LiveTerminalDialog {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override public void afterTextChanged(Editable s) {
-                renderFiltered.run();
+                refreshAsync.run();
             }
         };
         etSearch.addTextChangedListener(watcher);
         etDate.addTextChangedListener(watcher);
         cbLive.setOnCheckedChangeListener((btn, isChecked) -> {
-            renderFiltered.run();
+            handler.removeCallbacks(pollTask[0]);
+            refreshAsync.run();
             if (isChecked) {
-                loadOnce.run();
+                handler.postDelayed(pollTask[0], POLL_MS);
             }
         });
 
@@ -215,31 +316,18 @@ final class LiveTerminalDialog {
         dialog.setOnDismissListener(d2 -> {
             closed[0] = true;
             handler.removeCallbacks(pollTask[0]);
+            worker.shutdownNow();
         });
         dialog.show();
         Button refreshBtn = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
         if (refreshBtn != null) {
             refreshBtn.setOnClickListener(v -> {
                 lastLen[0] = -1L;
-                loadOnce.run();
+                refreshAsync.run();
             });
         }
-        loadOnce.run();
+        refreshAsync.run();
         handler.postDelayed(pollTask[0], POLL_MS);
-    }
-
-    private static File resolveFile(Activity a, int src) {
-        File run = Guest.runDir(a);
-        File logs = new File(a.getFilesDir(), "logs");
-        if (src == SRC_SERIAL) {
-            File f = new File(run, "serial.txt");
-            return f.isFile() ? f : new File(logs, "last-serial.txt");
-        }
-        if (src == SRC_STDERR) {
-            File f = new File(run, "qemu-stderr.txt");
-            return f.isFile() ? f : new File(logs, "last-qemu-stderr.txt");
-        }
-        return new File(logs, "app.txt");
     }
 
     static String filterLines(String raw, String queryLower, String dateLower) {
