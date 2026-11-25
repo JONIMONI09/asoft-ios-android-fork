@@ -616,13 +616,7 @@ public class MainActivity extends Activity {
         line.setPadding(dp(16), dp(6), dp(6), dp(6));
         updateText = text(line, "", 14, 0xff8cc4ff);
         updateText.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
-        updateGet = link("Get it", 0xff8cc4ff, v -> {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(UpdateCheck.releasePage(this))));
-            } catch (android.content.ActivityNotFoundException e) {
-                Toast.makeText(this, UpdateCheck.releasePage(this), Toast.LENGTH_LONG).show();
-            }
-        });
+        updateGet = link("Get it", 0xff8cc4ff, v -> startVerifiedApkUpdate());
         line.addView(updateGet);
         updateDismiss = link("Dismiss", 0xff5f84ad, v -> {
             UpdateCheck.Notice n = UpdateCheck.toShow(this);
