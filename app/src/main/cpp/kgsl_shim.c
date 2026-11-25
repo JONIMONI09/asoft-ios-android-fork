@@ -299,7 +299,8 @@ int asoft_trace_write(const char *path, const char *line, size_t max_bytes, int 
     }
     if (len == 0 || line[len - 1] != '\n') {
         const char nl = '\n';
-        (void)write(fd, &nl, 1);
+        ssize_t nw = write(fd, &nl, 1);
+        (void)nw;
     }
     close_trace_fd(fd);
     return 0;
