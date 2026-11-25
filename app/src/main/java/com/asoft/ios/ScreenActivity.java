@@ -37,6 +37,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     private volatile int surfW, surfH;
     private int fbPid = -1;             // the QEMU whose framebuffer is mapped
     private long lastTry;
+    private long lastFramePostNs;
     private Button restart;
     /** Under restart when stopped: boot without save, delete all saves, or factory reset (keep OS). */
     private Button recovery;
@@ -132,6 +133,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
         }       // Android 10: immersive()'s layout flags do the same
+        PerfConfig.load(this);
         view = new SurfaceView(this);
         view.getHolder().addCallback(this);
         builtFor = Guest.os(this);
@@ -1386,11 +1388,16 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             report.setVisibility(View.GONE);
         }
         if (fbPid == pid && attached && surfW > 0 && surfH > 0) {
-            int w = surfW, h = surfH;
-            final int p = pid;
-            render.post(() -> RunStats.frame(p, Render.frame(w, h)));
-            if ("running".equals(Guest.state) || "booting".equals(Guest.state)) {
-                keepThumb(false);       // (a boot's black screen is not kept)
+            int cap = PerfConfig.liveFrameCapFps;
+            long minIntervalNs = cap > 0 ? (1_000_000_000L / cap) : 0L;
+            if (minIntervalNs == 0L || frameTimeNanos - lastFramePostNs >= minIntervalNs) {
+                lastFramePostNs = frameTimeNanos;
+                int w = surfW, h = surfH;
+                final int p = pid;
+                render.post(() -> RunStats.frame(p, Render.frame(w, h)));
+                if ("running".equals(Guest.state) || "booting".equals(Guest.state)) {
+                    keepThumb(false);       // (a boot's black screen is not kept)
+                }
             }
         }
     }

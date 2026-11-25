@@ -935,6 +935,7 @@ public class MainActivity extends Activity {
             m.getMenu().add(0, 2, 0, "Screen: " + (Guest.scale26(this) == 2 ? "2x (faster)" : "3x (sharp)"));
         }
         m.getMenu().add(0, 3, 0, "Memory: " + Guest.ramMiB(this, os) / 1024 + " GB");
+        m.getMenu().add(0, 9, 0, "Advanced performance…");
         CrashReport.Record crash = CrashReport.latestFor(this, os);     // (three small files)
         if (crash != null) {
             m.getMenu().add(0, 6, 0, "Report the last crash…");
@@ -955,11 +956,281 @@ public class MainActivity extends Activity {
                 case 6: CrashReport.show(this, crash); break;
                 case 7: installIpa(); break;
                 case 8: askManageSaves(os); break;
+                case 9: showPerfDialog(os); break;
                 default: askRemove(os);
             }
             return true;
         });
         m.show();
+    }
+
+    /** Advanced QEMU, CPU, disk, display, and touch performance dialog inside the 3-dot OS menu. */
+    private void showPerfDialog(int os) {
+        final PerfConfig before = PerfConfig.load(this);
+        final PerfConfig cur = PerfConfig.load(this);
+        final String fastCores = CpuPlan.fastCores();
+        final String name = systemName(os);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(12), dp(20), dp(8));
+
+        TextView intro = new TextView(this);
+        intro.setText("Tune QEMU CPU, JIT cache, disk I/O, host display polling, and touch swipe pacing for "
+                + name + ".\n"
+                + (fastCores.isEmpty()
+                        ? "Host fast cores: not reported by kernel."
+                        : "Detected fast host CPU cores: " + fastCores + ".")
+                + "\n\nScope tags:\n"
+                + "• [Live] applies immediately (no restart needed).\n"
+                + "• [Next start] applies on the next start (including resuming a save).\n"
+                + "• [Next cold boot] applies on a fresh boot (saves keep their saved vCPUs).");
+        intro.setTextSize(13);
+        intro.setPadding(0, 0, 0, dp(12));
+        box.addView(intro);
+
+        // Quick preset buttons
+        LinearLayout presets = new LinearLayout(this);
+        presets.setOrientation(LinearLayout.HORIZONTAL);
+        android.widget.Button btnBalanced = new android.widget.Button(this);
+        btnBalanced.setText("Balanced Fast");
+        btnBalanced.setAllCaps(false);
+        android.widget.Button btnGaming = new android.widget.Button(this);
+        btnGaming.setText("Max Gaming");
+        btnGaming.setAllCaps(false);
+        android.widget.Button btnStock = new android.widget.Button(this);
+        btnStock.setText("Stock Defaults");
+        btnStock.setAllCaps(false);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        presets.addView(btnBalanced, plp);
+        presets.addView(btnGaming, plp);
+        presets.addView(btnStock, plp);
+        box.addView(presets);
+
+        // 1. vCPU Count [Next cold boot]
+        final int[] vcpuVals = {0, 2, 4, 6, 8};
+        final String[] vcpuLabels = {
+                "Auto (4 vCPUs — default)",
+                "2 vCPUs (less contention)",
+                "4 vCPUs (balanced)",
+                "6 vCPUs (matches 6 fast cores)",
+                "8 vCPUs (experimental, high heat)"
+        };
+        android.widget.Spinner spVcpus = addPerfSpinner(box,
+                "vCPU Count [Next cold boot]",
+                "Number of virtual CPU cores exposed to the guest. Saved states always resume with the vCPU count they were saved with (just like RAM).",
+                vcpuLabels, indexOf(vcpuVals, cur.vcpus));
+
+        // 2. Pin vCPUs & EL0 Stubs to Fast Cores [Next start]
+        android.widget.CheckBox cbPinFast = addPerfCheck(box,
+                "Pin vCPUs & Native-EL0 stubs to fast cores [Next start]",
+                fastCores.isEmpty()
+                        ? "Keeps QEMU vCPU threads and EL0 JIT stubs off slow efficiency cores when cpu_capacity is reported."
+                        : "Pins QEMU vCPU threads and EL0 JIT stubs to fast cores (" + fastCores + "), avoiding slow efficiency cores.",
+                cur.pinFastCores);
+
+        // 3. TCG Translation Block Cache (tb-size) [Next start]
+        final int[] tbVals = {512, 768, 1024, 1536};
+        final String[] tbLabels = {
+                "512 MiB (low RAM phones)",
+                "768 MiB (default)",
+                "1024 MiB (fewer JIT flushes)",
+                "1536 MiB (max JIT cache — 12–16 GB RAM)"
+        };
+        android.widget.Spinner spTb = addPerfSpinner(box,
+                "QEMU TCG JIT Cache (tb-size) [Next start]",
+                "Larger JIT translation cache reduces code recompilation stutters during SpringBoard swipes and app launches, at the cost of extra host RAM.",
+                tbLabels, indexOf(tbVals, cur.tbSizeMiB));
+
+        // 4. Dedicated Disk I/O Thread [Next start]
+        android.widget.CheckBox cbIoThread = addPerfCheck(box,
+                "Dedicated disk I/O thread (virtio-blk iothread) [Next start]",
+                "Moves disk reads/writes onto QEMU's dedicated iothread off the main event loop and BQL, reducing UI/touch hitches during storage activity.",
+                cur.diskIoThread);
+
+        // 5. Writeback Disk Cache [Next start]
+        android.widget.CheckBox cbWriteback = addPerfCheck(box,
+                "Writeback disk cache (cache=writeback) [Next start]",
+                "Uses host RAM page cache instead of O_DIRECT (cache=none) for faster burst disk reads/writes. Recommended only on 12–16 GB RAM devices; always use Save and close or Turn off cleanly.",
+                cur.diskWriteback);
+
+        // 6. Native-EL0 Stub Pool [Next start]
+        final int[] stubVals = {24, 32, 48};
+        final String[] stubLabels = {
+                "24 stubs (default)",
+                "32 stubs (fewer evictions)",
+                "48 stubs (heavy multitasking)"
+        };
+        android.widget.Spinner spStubs = addPerfSpinner(box,
+                "Native-EL0 Stub Pool (iOS 26) [Next start]",
+                "Number of native ARM64 user-space execution stubs kept warm. More stubs reduce eviction stalls when switching between SpringBoard and apps.",
+                stubLabels, indexOf(stubVals, cur.el0Stubs));
+
+        // 7. Host Display Frame Cap [Live]
+        final int[] fpsVals = {0, 60, 30};
+        final String[] fpsLabels = {
+                "Auto (native display Hz — default)",
+                "60 FPS cap (recommended for 120/144 Hz screens)",
+                "30 FPS cap (lowest CPU/heat overhead)"
+        };
+        android.widget.Spinner spFps = addPerfSpinner(box,
+                "Host Display Frame Poll Cap [Live]",
+                "Limits how often Android polls and uploads the guest framebuffer. Capping at 60 FPS on 120–144 Hz gaming displays saves host CPU and reduces heat.",
+                fpsLabels, indexOf(fpsVals, cur.frameCapFps));
+
+        // 8. Touch Swipe Pacing [Live]
+        final int[] touchVals = {PerfConfig.TOUCH_BALANCED, PerfConfig.TOUCH_RESPONSIVE, PerfConfig.TOUCH_LOW_OVERHEAD};
+        final String[] touchLabels = {
+                "Balanced (16 / 66 ms — default)",
+                "Responsive (8 / 33 ms — snappier swipes)",
+                "Low-overhead (33 / 100 ms — anti-stutter under heavy load)"
+        };
+        android.widget.Spinner spTouch = addPerfSpinner(box,
+                "Touch Swipe Pacing [Live]",
+                "Controls how quickly finger-move events are sent over QMP during swipes. Responsive reduces swipe delay; Low-overhead helps if swipes freeze under heavy CPU load.",
+                touchLabels, indexOf(touchVals, cur.touchPacing));
+
+        Runnable syncUi = () -> {
+            spVcpus.setSelection(indexOf(vcpuVals, cur.vcpus));
+            cbPinFast.setChecked(cur.pinFastCores);
+            spTb.setSelection(indexOf(tbVals, cur.tbSizeMiB));
+            cbIoThread.setChecked(cur.diskIoThread);
+            cbWriteback.setChecked(cur.diskWriteback);
+            spStubs.setSelection(indexOf(stubVals, cur.el0Stubs));
+            spFps.setSelection(indexOf(fpsVals, cur.frameCapFps));
+            spTouch.setSelection(indexOf(touchVals, cur.touchPacing));
+        };
+        btnBalanced.setOnClickListener(v -> {
+            PerfConfig p = PerfConfig.balancedFast();
+            copyPerf(p, cur);
+            syncUi.run();
+        });
+        btnGaming.setOnClickListener(v -> {
+            PerfConfig p = PerfConfig.maxGaming();
+            copyPerf(p, cur);
+            syncUi.run();
+        });
+        btnStock.setOnClickListener(v -> {
+            PerfConfig p = PerfConfig.stockDefaults();
+            copyPerf(p, cur);
+            syncUi.run();
+        });
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box);
+        new AlertDialog.Builder(this)
+                .setTitle("Advanced performance — " + name)
+                .setView(scroll)
+                .setPositiveButton("Save", (d, w) -> {
+                    PerfConfig next = new PerfConfig();
+                    next.vcpus = vcpuVals[spVcpus.getSelectedItemPosition()];
+                    next.pinFastCores = cbPinFast.isChecked();
+                    next.tbSizeMiB = tbVals[spTb.getSelectedItemPosition()];
+                    next.diskIoThread = cbIoThread.isChecked();
+                    next.diskWriteback = cbWriteback.isChecked();
+                    next.el0Stubs = stubVals[spStubs.getSelectedItemPosition()];
+                    next.frameCapFps = fpsVals[spFps.getSelectedItemPosition()];
+                    next.touchPacing = touchVals[spTouch.getSelectedItemPosition()];
+                    PerfConfig.save(this, next);
+                    notePerfChange(os, before, next);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private static void copyPerf(PerfConfig src, PerfConfig dst) {
+        dst.vcpus = src.vcpus;
+        dst.pinFastCores = src.pinFastCores;
+        dst.tbSizeMiB = src.tbSizeMiB;
+        dst.diskIoThread = src.diskIoThread;
+        dst.diskWriteback = src.diskWriteback;
+        dst.el0Stubs = src.el0Stubs;
+        dst.frameCapFps = src.frameCapFps;
+        dst.touchPacing = src.touchPacing;
+    }
+
+    private static int indexOf(int[] arr, int val) {
+        for (int i = 0; i < arr.length; i++) {
+            if (arr[i] == val) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private android.widget.Spinner addPerfSpinner(LinearLayout box, String title, String desc, String[] labels, int sel) {
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextSize(14);
+        t.setPadding(0, dp(14), 0, dp(2));
+        box.addView(t);
+        TextView d = new TextView(this);
+        d.setText(desc);
+        d.setTextSize(12);
+        d.setPadding(0, 0, 0, dp(4));
+        box.addView(d);
+        android.widget.Spinner sp = new android.widget.Spinner(this);
+        android.widget.ArrayAdapter<String> ad = new android.widget.ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_item, labels);
+        ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(ad);
+        sp.setSelection(sel);
+        box.addView(sp);
+        return sp;
+    }
+
+    private android.widget.CheckBox addPerfCheck(LinearLayout box, String title, String desc, boolean checked) {
+        android.widget.CheckBox cb = new android.widget.CheckBox(this);
+        cb.setText(title);
+        cb.setTypeface(Typeface.DEFAULT_BOLD);
+        cb.setTextSize(14);
+        cb.setChecked(checked);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(12);
+        box.addView(cb, lp);
+        TextView d = new TextView(this);
+        d.setText(desc);
+        d.setTextSize(12);
+        d.setPadding(dp(32), 0, 0, dp(4));
+        box.addView(d);
+        return cb;
+    }
+
+    /** Explains clearly which performance changes applied live vs. on next start / cold boot (mirrors noteRamChange). */
+    private void notePerfChange(int os, PerfConfig before, PerfConfig after) {
+        boolean cold = after.needsColdBootComparedTo(before);
+        boolean restart = after.needsRestartComparedTo(before);
+        boolean live = after.changedLiveComparedTo(before);
+        if (!cold && !restart && !live) {
+            Toast.makeText(this, "No performance settings changed.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!cold && !restart) {
+            Toast.makeText(this, "Live performance settings applied immediately.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        boolean up = Guest.running() && Guest.os(this) == os;
+        String name = systemName(os);
+        StringBuilder sb = new StringBuilder();
+        if (live) {
+            sb.append("• Live settings (frame cap / swipe pacing) are active immediately.\n\n");
+        }
+        if (restart) {
+            sb.append("• Engine settings (fast-core pinning, TCG JIT cache, disk I/O, EL0 stubs) take effect on the next start")
+                    .append(up ? " (after Save and close or Turn off)" : "")
+                    .append(" — including when resuming a save.\n\n");
+        }
+        if (cold) {
+            sb.append("• vCPU count (").append(after.vcpus == 0 ? "Auto / 4" : after.vcpus)
+                    .append(") takes effect on the next cold boot (3-dot menu > Boot, not from the save). Existing saves keep the vCPU count they were saved with.");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Performance settings saved — " + name)
+                .setMessage(sb.toString().trim())
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     /** Scans all saved states for @os off the UI thread and lets the user delete all saves or boot without save. */

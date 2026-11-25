@@ -36,10 +36,16 @@ final class CpuPlan {
 
     static CpuPlan forThisPhone(Context c) {
         CpuPlan auto = auto();
+        PerfConfig perf = PerfConfig.load(c);
+        int baseSmp = perf.vcpus > 0 ? perf.vcpus : auto.smp;
+        String detectedFast = fastCores();
+        String basePin = perf.pinFastCores && !detectedFast.isEmpty() ? detectedFast : auto.pin;
+        String baseWhy = auto.why + (perf.vcpus > 0 || perf.pinFastCores
+                ? " [perf: smp=" + baseSmp + ", pin=" + (basePin.isEmpty() ? "none" : basePin) + "]" : "");
         try {
             String t = new String(Files.readAllBytes(overrideFile(c).toPath())).trim();
-            int smp = auto.smp;
-            String pin = auto.pin;
+            int smp = baseSmp;
+            String pin = basePin;
             for (String w : t.split("\\s+")) {
                 if (w.matches("smp=[1-8]")) {
                     smp = Integer.parseInt(w.substring(4));
@@ -50,11 +56,31 @@ final class CpuPlan {
             return new CpuPlan(smp, pin, "cpu.txt \"" + t + "\" (automatic: " + auto.smp + " vCPUs, pin "
                     + (auto.pin.isEmpty() ? "none" : auto.pin) + ")");
         } catch (IOException e) {
-            return auto;        // no test file
+            return new CpuPlan(baseSmp, basePin, baseWhy);        // no test file
         }
     }
 
-    private static CpuPlan auto() {
+    /** Comma-separated indices of fast host CPU cores (cpu_capacity >= 60% of best), or empty if unavailable. */
+    static String fastCores() {
+        List<Integer> cap = readCapacities();
+        int best = 0;
+        for (int v : cap) {
+            best = Math.max(best, v);
+        }
+        if (cap.isEmpty() || best <= 0) {
+            return "";
+        }
+        StringBuilder fast = new StringBuilder();
+        int n = 0;
+        for (int i = 0; i < cap.size(); i++) {
+            if (cap.get(i) * 10 >= best * 6) {
+                fast.append(n++ > 0 ? "," : "").append(i);
+            }
+        }
+        return fast.toString();
+    }
+
+    private static List<Integer> readCapacities() {
         List<Integer> cap = new ArrayList<>();
         for (int i = 0; i < 64; i++) {
             File d = new File("/sys/devices/system/cpu/cpu" + i);
@@ -63,6 +89,11 @@ final class CpuPlan {
             }
             cap.add(readInt(new File(d, "cpu_capacity")));
         }
+        return cap;
+    }
+
+    private static CpuPlan auto() {
+        List<Integer> cap = readCapacities();
         int best = 0;
         for (int v : cap) {
             best = Math.max(best, v);

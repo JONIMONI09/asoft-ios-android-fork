@@ -2390,17 +2390,20 @@ final class Guest {
                 "-serial", "chardev:con",
                 "-d", "guest_errors,unimp", "-D", new File(run, "qemu.log").getPath(),
                 "-cpu", watch ? WatchProfile.CPU : ov.getOrDefault("cpu", CPU26),
-                "-smp", String.valueOf(smp), "-accel", "tcg,thread=multi,tb-size=768",
+                "-smp", String.valueOf(smp), "-accel", "tcg,thread=multi,tb-size=" + PerfConfig.load(c).tbSizeMiB,
                 // cache=none (O_DIRECT), as iOS 16's: a save's 4 GB do not go through the page cache (lmkd).
                 // Before QEMU's alignment fix (block/file-posix.c, 2026-11-05) a third of iOS 26's writes
                 // failed this way: this phone's f2fs with inline encryption fails a buffer that is not
                 // 4 KiB-aligned with EIO, which QEMU's probe took for "aligned"; since then 0 of 2,833
-                "-drive", "file=" + (sb != null ? sb.disk : userDisk(c, os)).getPath() + ",if=none,id=root,cache=" + ov.getOrDefault("cache", "none")
+                "-drive", "file=" + (sb != null ? sb.disk : userDisk(c, os)).getPath() + ",if=none,id=root,cache="
+                        + ov.getOrDefault("cache", PerfConfig.load(c).diskWriteback ? "writeback" : "none")
                         + ",discard=unmap,format=qcow2",
                 "-object", "iothread,id=disk",
-                // ios26.txt disk-iothread=on: the disk's requests and completions on their own thread, off the
-                // main loop and the BQL; it moved them (bqlprof) but sped nothing up measurably (2026-11-05)
-                "-device", "virtio-blk-pci,drive=root" + ("on".equals(ov.get("disk-iothread")) ? ",iothread=disk" : ""),
+                // ios26.txt disk-iothread=on or PerfConfig.diskIoThread: the disk's requests and completions on their
+                // own thread, off the main loop and the BQL
+                "-device", "virtio-blk-pci,drive=root"
+                        + ("on".equals(ov.getOrDefault("disk-iothread", PerfConfig.load(c).diskIoThread ? "on" : "off"))
+                                ? ",iothread=disk" : ""),
                 "-qmp", "unix:" + qmpPath(c) + ",server,nowait",
                 "-device", "qemu-xhci,id=xhci,conditional-intr-mapping=on,nonremovable=2"));
         // iOS 26 without a USB keyboard, so that iOS shows its own (kbd26); a save made with one loads with it
@@ -2415,6 +2418,8 @@ final class Guest {
         cmd.add("usb-touchscreen,bus=xhci.0,port=2,id=utouch");
         AppLog.note(c, "keyboard: " + (!kbd ? "iOS's own (no USB keyboard)" : unplug26 ? "the save has a USB keyboard: unplugged once it runs"
                 : "a USB keyboard"));
+        PerfConfig perfCfg = PerfConfig.load(c);
+        AppLog.note(c, "perf: " + perfCfg.summaryLine());
         if (watch) {
             WatchProfile.addButtons(cmd);
             WatchProfile.addNetwork(cmd);
@@ -2465,7 +2470,7 @@ final class Guest {
         if (missing.isEmpty()) {
             env.put("ASOFT_NATIVE_EL0", "1");
             env.put("ASOFT_NATIVE_EL0_TPIDRRO", "1");
-            env.put("ASOFT_NATIVE_EL0_STUBS", watch ? WatchProfile.STUBS : "24");
+            env.put("ASOFT_NATIVE_EL0_STUBS", watch ? WatchProfile.STUBS : String.valueOf(perfCfg.el0Stubs));
             env.put("ASOFT_NATIVE_EL0_DELAY_MS", "20000");
             env.put("ASOFT_NATIVE_EL0_PAC", "off");
             env.put("ASOFT_NATIVE_EL0_STATS", "1");
