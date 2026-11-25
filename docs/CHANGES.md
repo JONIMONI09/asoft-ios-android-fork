@@ -145,6 +145,10 @@
    - Moved `UpdateCheck.checkOnStart()` into `MainActivity.onStart()` so a fresh update check runs once every single time the app is opened (both cold launch and returning from background), with an in-flight guard (`checking`) and automatic throttle reset if a check fails offline.
    - Defaulted `UpdateCheck.useForkChannel()` to `true` on `-advanced-*` Fork CI builds when no explicit channel preference has been saved yet.
    - Automatically clears all leftover `.apk` / `.apk.part` files in the update cache via `ApkUpdater.clearCache()` on every fresh app launch (`MainActivity.onCreate()`).
+9. **Interactive Save Manager, Floating iOS Live Terminal & Full Reboot-Safe Settings (`LiveTerminalDialog.java`, `ic_bar_terminal.xml`, `Guest.java`, `MainActivity.java`, `ScreenActivity.java`):**
+   - Upgraded `MainActivity.askManageSaves()` into an interactive per-save manager: tap any save to rename its persistent display name (`Guest.setSaveDisplayName`) or delete that exact snapshot from qcow2 + metadata with post-delete verification (`Guest.snapshots`), alongside Delete all saves and Boot without save.
+   - Added a **`>_` Terminal** icon (`ic_bar_terminal.xml`) to `ScreenActivity`'s floating sidebar opening `LiveTerminalDialog` (`iOS Serial` / `QEMU stderr` / `App log`, keyword + date/time search with `Today` shortcut, and `Live follow` ON/OFF toggle) to diagnose black-screen boots directly over iOS.
+   - Switched remaining `SharedPreferences` writes in `Guest.java` (`select`, `setScale26`, `setRamMiB`) to synchronous `.commit()` so 100% of app settings survive force-closes and reboots.
 
 
 
