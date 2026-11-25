@@ -17,6 +17,7 @@ public class AsoftApp extends Application {
         if (getPackageName().equals(proc)) {
             AppExit.onStart(this);
             FreezeWatchdog.install(this);
+            CrashHandler.install(this);
             registerComponentCallbacks(new android.content.ComponentCallbacks2() {
                 @Override
                 public void onTrimMemory(int level) {

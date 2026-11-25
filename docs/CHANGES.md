@@ -152,6 +152,10 @@
 10. **QEMU Log Offload, Native-EL0 Startup Delay & Live Interaction Latency Logger (`PerfConfig.java`, `Guest.java`, `ScreenActivity.java`, `MainActivity.java`, `PerfConfigTest.java`):**
     - Added **`Disable QEMU guest_errors log (-d off)`** `[Next start]` (omits `-d guest_errors,unimp -D qemu.log`), **`Native-EL0 Startup Delay`** (`20 s / 10 s / 5 s`, `ASOFT_NATIVE_EL0_DELAY_MS`) `[Next start]`, and **`Log tap & swipe response times`** `[Live]` to `Advanced performance…`.
     - When interaction timing logging is enabled, `ScreenActivity` logs tap-to-first-frame latency (`ms`) and swipe duration / frame count / effective FPS to `app.txt` (viewable live in the floating Terminal under `App log`).
+11. **Global Crash Overlay Handler, All-Logs Non-Blocking Live Terminal & 8 GB High-RAM Option (`CrashHandler.java`, `CrashOverlayActivity.java`, `AndroidManifest.xml`, `AsoftApp.java`, `LiveTerminalDialog.java`, `Guest.java`, `MainActivity.java`):**
+    - Added global `CrashHandler` + isolated `:crash`-process `CrashOverlayActivity` that persists uncaught exceptions to `files/run/last-app-crash.txt` and displays a full stacktrace overlay with Copy and Restart buttons.
+    - Fixed `LiveTerminalDialog`'s `app.txt` path (`files/run/app.txt` + `AppLog.dir`), exposed all app/QEMU/diagnostic/crash/setup logs on demand, added clear `[Disabled by setting]` messages when `qemu.log` or `kgsl-trace.txt` is turned off, and moved all I/O + filtering off the UI thread (zero work when closed or paused) to prevent ANRs.
+    - Unlocked an optional **8 GB (`8192 MiB`)** iOS 26 RAM choice on devices with ≥ 14 GB physical RAM (with explicit warning dialog).
 
 
 

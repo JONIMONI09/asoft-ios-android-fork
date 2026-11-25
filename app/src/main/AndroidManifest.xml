@@ -73,6 +73,14 @@
             android:exported="false"
             android:resizeableActivity="true" />
 
+        <activity
+            android:name=".CrashOverlayActivity"
+            android:process=":crash"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
         <!-- exported in the debug build only: adb starts it in tests -->
         <activity
             android:name=".ScreenActivity"
