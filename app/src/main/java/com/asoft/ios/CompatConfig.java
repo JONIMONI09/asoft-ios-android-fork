@@ -112,7 +112,7 @@ final class CompatConfig {
         }
 
         boolean needsLdPreload() {
-            return !vanillaFallback && (kgslTrace || syncLogging || kgslCacheSync || multiVmaBounce || allHostBounce || featureGuard || submitThrottle);
+            return !vanillaFallback && (kgslTrace || syncLogging || kgslCacheSync);
         }
     }
 

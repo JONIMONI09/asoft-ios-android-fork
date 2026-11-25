@@ -1725,7 +1725,8 @@ public class MainActivity extends Activity {
 
     private void showSettings() {
         boolean can = MemoryCleaner.supported(this);
-        freeRamValue.setText(can ? MemoryCleaner.enabled(this) ? "On" : "Off" : "Pair first");
+        freeRamValue.setText(can ? MemoryCleaner.enabled(this) ? "On" : "Off"
+                : ShizukuBridge.available() ? "Grant Shizuku" : "Pair first");
         setupScreenValue.setText(SetupService.keepScreen(this) ? "On" : "Off");
         compat26Value.setText(CompatConfig.summary(CompatConfig.load(this)));
         int records = CrashReport.files(this).size();
@@ -1767,10 +1768,10 @@ public class MainActivity extends Activity {
         CompatConfig.Config cfg = CompatConfig.load(this).copy();
         final String[] labels = {
                 "Vanilla 0.1.7 fallback (disable all shims/overrides)",
-                "KGSL crash trace (synced kgsl-trace.txt before submits)",
+                "KGSL crash trace (kgsl-trace.txt; O_SYNC if enabled)",
                 "Crash-safe O_SYNC logging (app / stderr / serial in compat mode)",
-                "Multi-VMA host-import bounce (3-way byte-diff shadow memory)",
-                "KGSL cache sync before GPU submits",
+                "Multi-VMA host-import bounce (cached 3-way byte-diff shadow)",
+                "KGSL cache sync (batched BO sync on submit & wait)",
                 "Compat feature guard (strip sparse & host_image_copy)",
                 "Submit throttle (serialize & bound queue submits)",
                 "Disable lazy IOSurface reparking (REIMS_VGPU_LAZY_MAPPINGS=lists)",
@@ -1854,9 +1855,11 @@ public class MainActivity extends Activity {
             CompatConfig.markGpuPromptHandled(this);
             dialog.dismiss();
             showSettings();
-            String gpuName = (r != null && r.driver != null && !r.driver.isEmpty()) ? r.driver : "this GPU";
+            String gpuName = (r != null && r.gpu != null && !r.gpu.isEmpty()) ? r.gpu
+                    : (r != null && r.driver != null && !r.driver.isEmpty()) ? r.driver : "this GPU";
             Toast.makeText(this, compat
-                    ? "Auto-selected setup-safe Snapdragon preset for " + gpuName + " (lazy IOSurface reparking kept ON)"
+                    ? "Auto-selected fast setup-safe Snapdragon preset for " + gpuName
+                            + " (lazy IOSurface ON, trace/O_SYNC OFF)"
                     : "Auto-selected stock defaults (all off) for " + gpuName, Toast.LENGTH_LONG).show();
         });
     }
@@ -1882,31 +1885,31 @@ public class MainActivity extends Activity {
             case 0:
                 return "What it does: Completely disables all GPU shims, traces, and overrides so iOS 26 launches exactly like stock 0.1.7.\n\n"
                         + "When to enable it: You want to test stock behavior without losing your saved checkbox selections.\n\n"
-                        + "When to leave it OFF: Normal use when all other boxes are already off, or when you want to test specific compatibility fixes below.";
+                        + "When to leave it OFF: Normal use when all other boxes are already off, or when you want to use specific compatibility fixes below.";
             case 1:
-                return "What it does: Writes every GPU submit and KGSL call to kgsl-trace.txt and flushes it before the hardware runs it.\n\n"
+                return "What it does: Logs GPU submits and KGSL calls to kgsl-trace.txt (sampled after 200 commands unless verbose logging is on; written with O_SYNC only when Crash-safe O_SYNC logging is also enabled).\n\n"
                         + "When to enable it: Your phone hard-reboots during iOS 26 boot or use and you need a trace log to share.\n\n"
-                        + "When to leave it OFF: Normal daily use (it adds disk I/O overhead on every GPU call).";
+                        + "When to leave it OFF: Normal daily use (tracing adds extra I/O and LD_PRELOAD overhead).";
             case 2:
-                return "What it does: Flushes serial, QEMU stderr, and app logs directly to storage (O_SYNC) during iOS 26 compatibility runs.\n\n"
+                return "What it does: Flushes serial, QEMU stderr, app logs, and kgsl-trace.txt directly to storage (O_SYNC) during iOS 26 compatibility runs.\n\n"
                         + "When to enable it: Your phone reboots suddenly and the last log lines are missing after restart.\n\n"
-                        + "When to leave it OFF: Normal use when your device is not rebooting (synchronous writes slow down heavy logging).";
+                        + "When to leave it OFF: Normal daily use when your device is not rebooting (synchronous flash writes slow down heavy logging and submits).";
             case 3:
-                return "What it does: Copies multi-VMA host-pointer GPU imports through a 3-way byte-merged shadow buffer.\n\n"
+                return "What it does: Copies multi-VMA host-pointer GPU imports through a HOST_CACHED 3-way byte-merged shadow buffer (with zero-lock fast path when no buffers are bounced).\n\n"
                         + "When to enable it: Your Snapdragon/Adreno device crashes or reboots inside KGSL during host-memory imports (Issue #92).\n\n"
                         + "When to leave it OFF: iOS 26 already boots and runs without GPU kernel panics.";
             case 4:
-                return "What it does: Issues a KGSL cache sync on imported buffers before GPU queue submits.\n\n"
+                return "What it does: Issues a batched KGSL cache sync (IOCTL_KGSL_GPUOBJ_SYNC) on tracked host-imported buffers before GPU submits and after fence/semaphore completion.\n\n"
                         + "When to enable it: You see graphics corruption or KGSL crashes on Snapdragon devices that Multi-VMA bounce alone did not fix.\n\n"
-                        + "When to leave it OFF: Boot or rendering feels slow, or your device does not have KGSL cache corruption.";
+                        + "When to leave it OFF: You want maximum speed without LD_PRELOAD, or your device does not have KGSL cache corruption.";
             case 5:
-                return "What it does: Hides sparse binding and host_image_copy Vulkan features from the guest GPU driver.\n\n"
+                return "What it does: Hides sparse binding and host_image_copy Vulkan features from the guest GPU driver (init-time only, zero runtime overhead).\n\n"
                         + "When to enable it: Your Turnip/KGSL driver crashes when iOS 26 tries to use sparse or host_image_copy operations.\n\n"
                         + "When to leave it OFF: iOS 26 boots cleanly without Vulkan feature errors.";
             case 6:
-                return "What it does: Serializes and limits concurrent Vulkan queue submits from the guest.\n\n"
+                return "What it does: Serializes concurrent Vulkan queue submits from the guest (without stalling fence- or timeline-semaphore-synchronized submits).\n\n"
                         + "When to enable it: Your GPU driver hangs or reboots under bursty parallel submits.\n\n"
-                        + "When to leave it OFF: iOS 26 boot stalls or feels sluggish, or your device does not crash on submits.";
+                        + "When to leave it OFF: iOS 26 already runs stably without submit-related hangs.";
             case 7:
                 return "What it does: Disables lazy IOSurface reparking (REIMS_VGPU_LAZY_MAPPINGS=lists) and maps guest surface pages eagerly.\n\n"
                         + "When to enable it: Only if your driver refuses lazy IOSurface imports during UI rendering.\n\n"
@@ -1935,16 +1938,19 @@ public class MainActivity extends Activity {
     }
 
     private void showCompat26HelpDialog() {
-        String help = "All options default to OFF (stock 0.1.7 behavior).\n\n"
-                + "• KGSL crash trace: Writes synced GPU calls to kgsl-trace.txt. Turn ON first if your device reboots during iOS 26 boot.\n\n"
-                + "• Crash-safe O_SYNC logging: Flushes serial/stderr/app logs immediately during compat runs so the last lines survive a reboot.\n\n"
-                + "• Multi-VMA host-import bounce: Uses byte-merged shadow memory for multi-VMA host pointers. Enable if KGSL crashes on host imports.\n\n"
-                + "• KGSL cache sync: Syncs imported buffers before GPU submits. Can reduce speed; turn OFF first if boot feels very slow.\n\n"
-                + "• Compat feature guard: Hides sparse binding & host_image_copy extensions from the guest GPU driver.\n\n"
-                + "• Submit throttle: Serializes Vulkan queue submits. Turn OFF if a boot hangs or stalls.\n\n"
-                + "• Disable lazy IOSurface reparking: Uses list mode for IOSurface mappings.\n\n"
+        String help = "All 12 options default to OFF (stock 0.1.7 behavior).\n\n"
+                + "• Auto for GPU: Checks your last GPU test result and selects either the fast setup-safe Snapdragon preset "
+                + "(Multi-VMA bounce, batched KGSL cache sync, Compat feature guard, Submit throttle — with Crash trace, "
+                + "O_SYNC logging, and Disable lazy IOSurface reparking kept OFF for speed and stability) or stock defaults.\n\n"
+                + "• KGSL crash trace: Writes GPU submits and KGSL calls to kgsl-trace.txt (uses O_SYNC only when Crash-safe O_SYNC logging is also ON). Turn ON only when diagnosing a hard reboot.\n\n"
+                + "• Crash-safe O_SYNC logging: Flushes serial/stderr/app/trace logs immediately during compat runs so the last lines survive a reboot. Keep OFF for daily speed.\n\n"
+                + "• Multi-VMA host-import bounce: Uses HOST_CACHED 3-way byte-merged shadow memory for multi-VMA host pointers (zero-lock fast path when unused).\n\n"
+                + "• KGSL cache sync: Batches cache syncs on host-imported BOs before submit and after GPU completion. Turn OFF if you want to skip LD_PRELOAD completely.\n\n"
+                + "• Compat feature guard: Hides sparse binding & host_image_copy extensions at init time (zero runtime cost).\n\n"
+                + "• Submit throttle: Serializes concurrent Vulkan submits without stalling semaphore- or fence-synced frames.\n\n"
+                + "• Disable lazy IOSurface reparking: WARNING — leave OFF during iOS 26 setup / DataMigration and normal use! Turning it ON can exhaust Android's 65,530 memory mapping limit and stop QEMU.\n\n"
                 + "• Opt-in toggles (Bounce ALL, Dedicated import thread, Turnip safe debug, Verbose engine logs): Diagnostic/experimental only — keep OFF unless troubleshooting a specific crash.\n\n"
-                + "Troubleshooting tip: If your phone still reboots, share kgsl-trace.txt from Logs. If a mitigation stops the reboot, disable options one by one to find which single switch fixed it.";
+                + "Performance tip: For faster iOS 26 UI and app launches, use Auto for GPU, switch iOS 26's menu to Screen: 2x (faster), and use Save and close once iOS finishes its first-boot indexing (~15 min).";
         new AlertDialog.Builder(this)
                 .setTitle("About GPU compatibility settings")
                 .setMessage(help)
@@ -1963,10 +1969,11 @@ public class MainActivity extends Activity {
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("Free memory while iOS runs?")
+                .setTitle("Free memory for iOS?")
                 .setMessage("What it does: While iOS runs (and once before memory-heavy setup steps or saves), this app "
-                        + "ends cached background processes of your other apps every 90 s. Your other apps are not "
-                        + "force-stopped (alarms and notifications stay), but background apps reload when reopened.\n\n"
+                        + "ends cached background processes of your other apps every 90 s (using Shizuku first, with "
+                        + "automatic fallback to Wireless debugging). Your other apps are not force-stopped (alarms and "
+                        + "notifications stay), but background apps reload when reopened.\n\n"
                         + "When to enable it: Devices with 8–12 GB RAM, or whenever Android closes iOS during setup, "
                         + "boot, or saving state (iOS needs 4–8 GB, plus ~3 GB when saving).\n\n"
                         + "When to leave it OFF: Devices with 16 GB+ RAM where iOS already runs and saves reliably "
@@ -2050,31 +2057,31 @@ public class MainActivity extends Activity {
             AlertDialog.Builder b = new AlertDialog.Builder(this)
                     .setTitle("Wireless debugging")
                     .setMessage(WirelessAdb.status(this) + ".\n\nWhile iOS runs, the app asks Android through it to end the "
-                            + "background processes of other apps (Free memory while iOS runs).\n\nAfter a restart of the phone "
+                            + "background processes of other apps (Free memory for iOS).\n\nAfter a restart of the phone "
                             + "Wireless debugging is off until you turn it on again (Developer options, on Wi-Fi); the pairing stays."
                             + (shizukuRunning ? "\n\nShizuku is currently running — you can switch to Shizuku with one tap." : "\n\nTip: You can also start the Shizuku app and use it instead of Wireless debugging."))
-                    .setNegativeButton("Close", null);
+                    .setNeutralButton("Unpair", (d, w) -> new Thread(() -> {
+                        // closing the adb connection writes to its TLS socket: never on the main thread (A#110,
+                        // NetworkOnMainThreadException from AdbConnection.close)
+                        WirelessAdb.unpair(this);
+                        runOnUiThread(() -> {
+                            if (isFinishing()) {
+                                return;
+                            }
+                            showSettings();
+                            Toast.makeText(this, "Unpaired. Settings still lists the key under Wireless debugging > Paired devices: "
+                                    + "remove it there too.", Toast.LENGTH_LONG).show();
+                        });
+                    }, "wadb-unpair").start());
             if (shizukuRunning) {
                 b.setPositiveButton("Use Shizuku", (d, w) -> {
                     WadbPairService.stop(this);
                     ShizukuBridge.requestPermission();
                 });
-                b.setNeutralButton("Test now", (d, w) -> testWirelessAdb());
+                b.setNegativeButton("Test now", (d, w) -> testWirelessAdb());
             } else {
                 b.setPositiveButton("Test now", (d, w) -> testWirelessAdb());
-                b.setNeutralButton("Unpair", (d, w) -> new Thread(() -> {
-                    // closing the adb connection writes to its TLS socket: never on the main thread (A#110,
-                    // NetworkOnMainThreadException from AdbConnection.close)
-                    WirelessAdb.unpair(this);
-                    runOnUiThread(() -> {
-                        if (isFinishing()) {
-                            return;
-                        }
-                        showSettings();
-                        Toast.makeText(this, "Unpaired. Settings still lists the key under Wireless debugging > Paired devices: "
-                                + "remove it there too.", Toast.LENGTH_LONG).show();
-                    });
-                }, "wadb-unpair").start());
+                b.setNegativeButton("Close", null);
             }
             b.show();
             return;

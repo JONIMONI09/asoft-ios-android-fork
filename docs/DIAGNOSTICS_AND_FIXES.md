@@ -24,13 +24,14 @@
 ---
 
 ## 3. Advanced Settings Guide (`?` Help in `MainActivity.showCompat26Dialog()`)
-- **KGSL crash trace:** Synced `kgsl-trace.txt` before submits. Enable first to capture last GPU call before a hard reboot.
-- **Crash-safe O_SYNC logging:** Immediate flush of serial/stderr/app logs during compat runs only.
-- **Multi-VMA host-import bounce:** Byte-merged 3-way shadow memory for multi-VMA host imports.
-- **KGSL cache sync:** Syncs imported buffers before submits (disable first if boot is slow).
-- **Compat feature guard:** Strips sparse binding and `host_image_copy` from guest Vulkan features.
-- **Submit throttle:** Serializes queue submits (disable if boot stalls).
-- **Disable lazy IOSurface reparking:** Uses list mode (`REIMS_VGPU_LAZY_MAPPINGS=lists`).
+- **Auto for GPU:** Inspects `GpuCheck.last()` and selects either the fast setup-safe Snapdragon preset (`Multi-VMA bounce`, batched `KGSL cache sync`, `Compat feature guard`, `Submit throttle`; with `KGSL crash trace`, `O_SYNC logging`, and `Disable lazy IOSurface reparking` OFF) or stock defaults.
+- **KGSL crash trace:** Writes GPU submits and KGSL calls to `kgsl-trace.txt` (sampled after 200 commands unless verbose logging is ON; uses `O_SYNC` only when `Crash-safe O_SYNC logging` is also ON). Keep OFF for daily speed; enable when diagnosing a hard reboot.
+- **Crash-safe O_SYNC logging:** Immediate flush of serial/stderr/app/trace logs during compat runs only. Keep OFF for daily speed.
+- **Multi-VMA host-import bounce:** `HOST_CACHED` 3-way byte-merged shadow memory for multi-VMA host imports (zero-lock fast path when 0 buffers are bounced).
+- **KGSL cache sync:** Batched `IOCTL_KGSL_GPUOBJ_SYNC` on host-imported BOs before submit and after completion (disable if you want zero `LD_PRELOAD`).
+- **Compat feature guard:** Strips sparse binding and `host_image_copy` from guest Vulkan features at init time (zero runtime cost).
+- **Submit throttle:** Serializes concurrent Vulkan submits without stalling fence- or semaphore-synchronized frames.
+- **Disable lazy IOSurface reparking:** Uses list mode (`REIMS_VGPU_LAZY_MAPPINGS=lists`). **WARNING:** Leave OFF during iOS 26 setup / `DataMigration` and normal use — turning it ON can exhaust Android's 65,530 `vm.max_map_count` limit.
 - **Opt-in toggles:** Keep OFF unless diagnosing a specific issue.
 
 ---
@@ -51,7 +52,7 @@
 
 ## 6. Floating Window / Freeform & Persistent CI Signing (`e37ecb4`, `8e87f1b`)
 - **Floating Window:** Added `android.software.freeform_window_management`, `android.allow_multiple_resumed_activities`, and `<layout>` on `MainActivity` in `AndroidManifest.xml`.
-- **Persistent CI Keystore:** `.github/workflows/apk-release.yml` on `work-ci-branch` explicitly signs every APK with cached `~/.android/debug.keystore` via `apksigner` so all builds from `#15` onward install as in-place updates without data loss.
+- **Persistent CI Keystore:** CI on `work-ci-branch` explicitly signs every APK with cached `~/.android/debug.keystore` via `apksigner` so all builds from `#15` onward install as in-place updates without data loss.
 
 ---
 
@@ -64,21 +65,42 @@
 
 ---
 
-## 8. Non-GPU Reliability Fixes: Shizuku-First RAM Cleaner, Reboot-Safe Settings, Startup Update Check & Per-Toggle Guidance
+## 8. Non-GPU Reliability Fixes: Shizuku-First RAM Cleaner, Reboot-Safe Settings, Startup Update Check & Per-Toggle Guidance (`34624cf`)
 - **Date Added:** 2026-11-24
 - **RAM Cleaning & Shizuku Reliability (`MemoryCleaner.java`, `ShizukuBridge.java`, `MainActivity.java`):**
-  - Added `MemoryCleaner.runPrivilegedShell()` preferring live `ShizukuBridge.granted()` first and automatically falling back to `WirelessAdb.shell(...)` on `IOException`. Used across `round()`, `freeNow()`, `info()`, and `MainActivity.testWirelessAdb()` so a stale/disabled Wireless ADB pairing (`ECONNREFUSED`) never blocks working Shizuku.
-  - Checked `!Thread.currentThread().isInterrupted()` in `MemoryCleaner.start()` so an interrupted background loop exits cleanly.
-  - Added a daemon `shizuku-stderr` drainer thread in `ShizukuBridge.shell()` so verbose stderr never deadlocks the child process, and ensured watchdog kills always report `"Shizuku command timed out"` even if the stdout stream throws an `IOException`.
-- **Reboot-Safe Settings Persistence (`CompatConfig.java`, `MemoryCleaner.java`, `SetupService.java`, `UpdateCheck.java`):**
-  - Switched `SharedPreferences` writes from asynchronous `.apply()` to synchronous `.commit()` in `CompatConfig.save()`, `CompatConfig.markGpuPromptHandled()`, `MemoryCleaner.setEnabled()`, `SetupService.setKeepScreen()`, `SetupService.setWifiOnly()`, `UpdateCheck.setEnabled()`, `UpdateCheck.setUseForkChannel()`, and `UpdateCheck.dismiss()` so user preferences survive sudden hard reboots.
-- **Startup Update Check for Upstream & Fork CI (`UpdateCheck.java`, `MainActivity.java`):**
-  - Added `UpdateCheck.checkOnStart()` (invoked in `MainActivity.onCreate()`) to run a fresh update check on every app launch.
-  - Routed Fork CI checks to `ApkUpdater.FORK_API`, allowed `prerelease: true` (while still skipping `draft: true`), added `-advanced-<N>` build-number comparison in `UpdateCheck.newer()`, and cleared the cached `latest` notice when switching channels.
-- **Per-Toggle Plain-English Guidance (`MainActivity.java`):**
-  - Turning any option ON in **iOS 26 GPU compatibility (#92)** now shows a plain-English dialog explaining what it does, when to enable it, when to leave it OFF, and `"If you are not sure what this setting does, leave it OFF."` with a quick **Turn OFF** option.
-  - Clarified **Free memory while iOS runs** guidance for 8–12 GB vs. 16 GB+ devices.
-- **Unit Tests & Docs:**
-  - Added `UpdateCheckTest.java`, expanded `MemoryCleanerTest.java` and `ApkUpdaterTest.java`, and organized custom fork markdown docs under `docs/`.
+  - Added `MemoryCleaner.runPrivilegedShell()` preferring live `ShizukuBridge.granted()` first and automatically falling back to `WirelessAdb.shell(...)` on `IOException`.
+  - Checked `!Thread.currentThread().isInterrupted()` in `MemoryCleaner.start()` and added a daemon `shizuku-stderr` drainer + reliable timeout handling in `ShizukuBridge.shell()`.
+- **Reboot-Safe Settings Persistence:** Switched `SharedPreferences` writes from `.apply()` to synchronous `.commit()` across `CompatConfig`, `MemoryCleaner`, `SetupService`, and `UpdateCheck`.
+- **Startup Update Check & Per-Toggle Guidance:** Added `UpdateCheck.checkOnStart()`, Fork CI prerelease & `-advanced-<N>` build comparison, per-toggle plain-English explanations, and `UpdateCheckTest.java`.
+
+---
+
+## 9. Updater Hardening, Shizuku Banner & Sleep-Safe `DataMigration` (`09a16ee` – `c200dfa`)
+- **Date Added:** 2026-11-24 – 2026-11-25
+- **Detached Dialog Fix (`09a16ee`):** Added `MainActivity.safeDismiss()` so background updater callbacks never crash with `View not attached to window manager`.
+- **Updater Hardening (`05500bd`, `c200dfa`):**
+  - Blocked updates while Setup or iOS is running (`SetupService.busy() || Guest.running()`).
+  - Added live installed-vs-latest version comparison (`"App is up to date"` + **Force reinstall** with `ApkUpdater.clearCache()`), download size vs. free storage confirmation, `canRequestPackageInstalls()` check with `onResume()` auto-resume, transient DNS/network retry, and optional `-PasoftVersionName=...` in `app/build.gradle`.
+- **65,530 Mapping Safeguard & Shizuku Home Banner (`6fbf0b5`):**
+  - Removed `lazySurfacesOff = true` from `recommendedForKnownKgslBug()`, added GPU-aware `recommendedForGpu()` + **Auto for GPU** button, and added clickable `adbWarn` banner on `MainActivity` when Shizuku / Wireless debugging is disconnected.
+- **Sleep-Safe `DataMigration` (`37612db`):**
+  - Subtracted Android Deep Sleep duration (`elapsedRealtime - uptimeMillis`) from `PhoneSetup26.iosWallpaper()` elapsed minutes and `MigrationWatch`, preventing false ceiling aborts after overnight sleep.
+
+---
+
+## 10. iOS 26 Performance Optimizations in `kgsl_shim.c` & `CompatConfig.java` (`2026-11-25`)
+- **Root Causes Uncovered (`submitting 25–32 ms` in `reims` logs):**
+  1. `submitThrottle` called synchronous `vkQueueWaitIdle()` on timeline-semaphore submits (`fence == VK_NULL_HANDLE`), stalling CPU/GPU pipelining every frame.
+  2. `kgslCacheSync` fired twice per submit (`vkQueueSubmit*` + `IOCTL_KGSL_GPU_COMMAND`), issued unbatched per-BO ioctls across all tracked BOs, and repeatedly flushed on `vkGetFenceStatus` polls.
+  3. `/proc/self/maps` was parsed to EOF (up to 60,000 VMAs) on every host-pointer import even when bouncing was disabled.
+  4. `find_host_coherent_mem_type()` accepted uncached Write-Combining (WC) memory (~200 MB/s reads) over `HOST_CACHED` (~20 GB/s), and `sync_device_bounces()` locked global `g_state_lock` across 4,096 slots even with 0 bounced buffers.
+  5. `LD_PRELOAD` locked global `g_state_lock` on every `close()`/`ioctl()` in QEMU and was injected even when only pure Vulkan ICD hooks were enabled.
+- **Fixes Applied:**
+  1. Semaphore-aware `asoft_submit_needs_throttle_drain()` skips `vkQueueWaitIdle()` when any semaphore is signaled.
+  2. Batched `IOCTL_KGSL_GPUOBJ_SYNC` per KGSL fd, thread-local `t_in_vk_submit` prevents double sync, atomic `g_kgsl_bo_count` fast-path, and deduped `vkGetFenceStatus` syncs.
+  3. Early `break` when `lo >= end` in `asoft_parse_proc_maps()` and gated `/proc/self/maps` open on active bounce/trace.
+  4. `asoft_select_bounce_mem_type()` prefers `HOST_VISIBLE | HOST_COHERENT | HOST_CACHED`, dedicated `g_bounce_lock`, and atomic `g_bounce_active_count == 0` fast-path.
+  5. Lock-free atomic FD bitset (`g_kgsl_fd_bits`) for fds 0–1023 and decoupled `CompatConfig.Config.needsLdPreload()` to `kgslTrace || syncLogging || kgslCacheSync`.
+
 
 

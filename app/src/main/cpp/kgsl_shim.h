@@ -69,6 +69,22 @@ size_t asoft_bounce_sync_to_host(struct asoft_bounce_region *reg);
 int asoft_is_guarded_extension(const char *ext_name);
 
 /*
+ * Picks the best Vulkan memory type index for shadow bounce buffers:
+ * always prefers HOST_VISIBLE | HOST_COHERENT | HOST_CACHED (to avoid ~50x slower uncached WC reads
+ * during 3-way page-diff syncs) before falling back to uncached HOST_VISIBLE | HOST_COHERENT.
+ */
+int asoft_select_bounce_mem_type(
+        const uint32_t *prop_flags,
+        uint32_t count,
+        uint32_t preferred_idx,
+        uint32_t host_visible_bit,
+        uint32_t host_coherent_bit,
+        uint32_t host_cached_bit);
+
+/* Returns 1 only when submitThrottle must drain an unsynchronized submit (no fence and no signal semaphore). */
+int asoft_submit_needs_throttle_drain(int has_fence, uint32_t total_signal_semaphores);
+
+/*
  * Appends a single trace line to path, rotating path -> "<path>.prev" once max_bytes is reached.
  * When use_osync != 0, opens with O_SYNC (falling back without O_SYNC if the filesystem rejects it).
  * Returns 0 on success, -1 on error.

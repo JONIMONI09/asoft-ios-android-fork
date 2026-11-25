@@ -106,6 +106,22 @@ public class CompatConfigTest {
     }
 
     @Test
+    public void icdOnlySwitchesDoNotInjectLdPreload() {
+        CompatConfig.Config cfg = CompatConfig.Config.safeDefaults();
+        cfg.multiVmaBounce = true;
+        cfg.featureGuard = true;
+        cfg.submitThrottle = true;
+        Map<String, String> env = CompatConfig.envAdditions(
+                true, false, cfg, NATIVE_DIR, LINKS_DIR, RUN_DIR, NO_OVERRIDES);
+        assertTrue(CompatConfig.shouldUseIcdShim(true, false, cfg));
+        assertFalse(cfg.needsLdPreload());
+        assertFalse(env.containsKey("LD_PRELOAD"));
+        assertEquals("1", env.get("ASOFT_SHIM_MULTI_VMA_BOUNCE"));
+        assertEquals("1", env.get("ASOFT_SHIM_FEATURE_GUARD"));
+        assertEquals("1", env.get("ASOFT_SHIM_SUBMIT_THROTTLE"));
+    }
+
+    @Test
     public void optInTogglesAndIos26TxtOverridesRespected() {
         CompatConfig.Config cfg = CompatConfig.Config.recommendedForKnownKgslBug();
         cfg.kgslTrace = true;

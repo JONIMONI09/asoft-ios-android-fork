@@ -188,11 +188,58 @@ static void test_host_to_shadow_preserves_concurrent_gpu_writes(void)
     free(prev);
 }
 
+static void test_proc_maps_early_break(void)
+{
+    const char *sample =
+            "7000000000-7000010000 rw-s 00000000 00:01 123 /memfd:guest-ram\n"
+            "7000020000-7000030000 rw-s 00000000 00:01 124 /memfd:later\n"
+            "7000040000-7000050000 rw-s 00000000 00:01 125 /memfd:never-read\n";
+    FILE *fp = fmemopen((void *)sample, strlen(sample), "r");
+    assert(fp != NULL);
+    struct asoft_vma_stats st;
+    assert(asoft_parse_proc_maps(fp, 0x7000000000ULL, 0x10000, &st) == 0);
+    assert(st.vma_count == 1);
+    assert(st.total_mapped == 0x10000);
+    /* Must have stopped after seeing 7000020000 >= end without consuming the 3rd line */
+    char rem[128] = {0};
+    assert(fgets(rem, sizeof(rem), fp) != NULL);
+    assert(strstr(rem, "never-read") != NULL);
+    fclose(fp);
+}
+
+static void test_bounce_mem_type_prefers_cached(void)
+{
+    const uint32_t VIS = 1u << 0;
+    const uint32_t COH = 1u << 1;
+    const uint32_t CACHED = 1u << 2;
+    /* Index 0 = Device-local, Index 1 = WC (VIS|COH, preferred), Index 2 = Cached (VIS|COH|CACHED) */
+    uint32_t flags[] = { 0, VIS | COH, VIS | COH | CACHED };
+    assert(asoft_select_bounce_mem_type(flags, 3, 1, VIS, COH, CACHED) == 2);
+
+    /* When no cached heap exists, falls back to preferred WC coherent index */
+    uint32_t wc_only[] = { 0, VIS | COH };
+    assert(asoft_select_bounce_mem_type(wc_only, 2, 1, VIS, COH, CACHED) == 1);
+}
+
+static void test_submit_throttle_semaphore_check(void)
+{
+    /* Fence present -> never drain */
+    assert(asoft_submit_needs_throttle_drain(1, 0) == 0);
+    assert(asoft_submit_needs_throttle_drain(1, 2) == 0);
+    /* Timeline/binary semaphore present (fence == NULL) -> do NOT stall with vkQueueWaitIdle */
+    assert(asoft_submit_needs_throttle_drain(0, 1) == 0);
+    /* Truly unsynchronized submit -> drain */
+    assert(asoft_submit_needs_throttle_drain(0, 0) == 1);
+}
+
 int main(void)
 {
     test_proc_maps_single_and_multi_vma();
+    test_proc_maps_early_break();
     test_three_way_page_diff_bounce();
     test_host_to_shadow_preserves_concurrent_gpu_writes();
+    test_bounce_mem_type_prefers_cached();
+    test_submit_throttle_semaphore_check();
     test_guarded_extensions();
     test_trace_rotation_and_sync_write();
     printf("kgsl_shim_test: all assertions passed\n");
