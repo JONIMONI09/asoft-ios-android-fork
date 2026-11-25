@@ -74,9 +74,9 @@ public class CompatConfigTest {
         Map<String, String> env = CompatConfig.envAdditions(
                 true, false, cfg, NATIVE_DIR, LINKS_DIR, RUN_DIR, NO_OVERRIDES);
 
-        assertEquals("1", env.get("ASOFT_SYNC_LOG"));
-        assertEquals("1", env.get("ASOFT_SYNC_SERIAL"));
-        assertEquals(new File(RUN_DIR, CompatConfig.TRACE_FILE).getPath(), env.get("ASOFT_KGSL_TRACE_FILE"));
+        assertFalse(env.containsKey("ASOFT_SYNC_LOG"));
+        assertFalse(env.containsKey("ASOFT_SYNC_SERIAL"));
+        assertFalse(env.containsKey("ASOFT_KGSL_TRACE_FILE"));
         assertEquals("1", env.get("ASOFT_SHIM_MULTI_VMA_BOUNCE"));
         assertEquals("1", env.get("ASOFT_SHIM_CACHE_SYNC"));
         assertEquals("1", env.get("ASOFT_SHIM_FEATURE_GUARD"));
@@ -95,6 +95,8 @@ public class CompatConfigTest {
         CompatConfig.Config snapdragon = CompatConfig.Config.recommendedForGpu(true, true, false);
         assertTrue(snapdragon.multiVmaBounce);
         assertFalse(snapdragon.lazySurfacesOff);
+        assertFalse(snapdragon.kgslTrace);
+        assertFalse(snapdragon.syncLogging);
 
         CompatConfig.Config systemDriver = CompatConfig.Config.recommendedForGpu(true, true, true);
         assertFalse(systemDriver.multiVmaBounce);
@@ -106,6 +108,7 @@ public class CompatConfigTest {
     @Test
     public void optInTogglesAndIos26TxtOverridesRespected() {
         CompatConfig.Config cfg = CompatConfig.Config.recommendedForKnownKgslBug();
+        cfg.kgslTrace = true;
         cfg.allHostBounce = true;
         cfg.importThreadAlways = true;
         cfg.tuDebugSafe = true;

@@ -1345,7 +1345,9 @@ final class PhoneSetup26 {
                     throw new IOException("stopped");
                 }
                 mustRun(c, "DataMigration");
-                long min = (System.currentTimeMillis() - t1) / 60_000;
+                long susp = Math.max(0, android.os.SystemClock.elapsedRealtime() - android.os.SystemClock.uptimeMillis() - suspend0);
+                long activeBeforePoll = Math.max(t1, System.currentTimeMillis() - susp);
+                long min = (activeBeforePoll - t1) / 60_000;
                 // the wait is estimated by time, and it used to stop at 85 % after 60 min: a boot that went on
                 // (a slow phone, or iOS still working) looked frozen at exactly 85 % in the setup screen. Past
                 // 60 min it now moves a point every 15 min, up to 95.
@@ -1353,26 +1355,28 @@ final class PhoneSetup26 {
                 p.step("ios26:wallpaper", pct, (min <= 75
                         ? "DataMigration is setting iOS up (" + min + " min; on a PC about " + SystemAppMigrator.pcMinutes(sam) + "). The phone may get warm."
                         : "DataMigration is taking longer than usual (" + min + " min; a phone needs about 60 to 75)."
-                                + " It can take a few hours on a slow phone; leave it running.") + watch.quietStatus(System.currentTimeMillis()));
+                                + " It can take a few hours on a slow phone; leave it running.") + watch.quietStatus(activeBeforePoll));
                 // reset: a poll typed behind one that never ended, or onto a line with an open quote, never started
                 // (A#259, A#284); run() does not type a command again once bash has printed its start marker
                 String o = con.run("cat " + plist, 90_000, 60_000, true);
                 SetupTick.Poll poll = con.lastPoll();
                 long now = System.currentTimeMillis();
-                watch.observe(now, o != null, ConsoleLife.readNew(serial, watchAt, 1 << 20), framesShown(c));
+                long suspNow = Math.max(0, android.os.SystemClock.elapsedRealtime() - android.os.SystemClock.uptimeMillis() - suspend0);
+                long activeNow = Math.max(t1, now - suspNow);
+                watch.observe(activeNow, o != null, ConsoleLife.readNew(serial, watchAt, 1 << 20), framesShown(c));
                 if (o != null) {
-                    answered = now;
+                    answered = activeNow;
                     quietTold = 0;
                     serialThen = serial.length();
                     framesThen = framesShown(c);
-                } else if (now - answered >= 15 * 60_000 && now - quietTold >= 15 * 60_000) {
+                } else if (activeNow - answered >= 15 * 60_000 && activeNow - quietTold >= 15 * 60_000) {
                     // every 15 min without an answer: has its screen or its console moved since? Only said, the boot
                     // goes on: that user's second boot finished its DataMigration after more than 69 min, 19 of them
                     // or more with no answer, so a silent shell alone is no end
-                    quietTold = now;
+                    quietTold = activeNow;
                     int frames = framesShown(c) - framesThen;
                     long bytes = serial.length() - serialThen;
-                    AppLog.note(c, "setup26: iOS's shell has not answered for " + (now - answered) / 60_000 + " min ("
+                    AppLog.note(c, "setup26: iOS's shell has not answered for " + (activeNow - answered) / 60_000 + " min ("
                             + frames + " new frames, " + bytes + " new bytes of console since)");
                     serialThen = serial.length();
                     framesThen = framesShown(c);
@@ -1381,9 +1385,8 @@ final class PhoneSetup26 {
                 if (first || min / 5 != lastTick) {
                     lastTick = min / 5;
                     toldSilent |= first;
-                    long susp = android.os.SystemClock.elapsedRealtime() - android.os.SystemClock.uptimeMillis() - suspend0;
-                    AppLog.note(c, "setup26: " + tick.tick((int) min, first ? "first no answer" : "5 min", framesShown(c), susp / 1000,
-                            (now - t0) / 1000) + ", " + SetupTick.pollText(poll, o != null, (now - answered) / 60_000) + ", " + hostText(c, late.takeMax()));
+                    AppLog.note(c, "setup26: " + tick.tick((int) min, first ? "first no answer" : "5 min", framesShown(c), suspNow / 1000,
+                            (now - t0) / 1000) + ", " + SetupTick.pollText(poll, o != null, (activeNow - answered) / 60_000) + ", " + hostText(c, late.takeMax()));
                     if (first) {
                         tick.silent();
                     }
@@ -1409,17 +1412,17 @@ final class PhoneSetup26 {
                     AppLog.note(c, "setup26: DataMigration " + min + " min, thermal " + thermal(c) + ", crash reports: "
                             + (d == null ? "(no answer)" : d.trim()));
                 }
-                MigrationWatch.Verdict v = watch.verdict(now);
+                MigrationWatch.Verdict v = watch.verdict(activeNow);
                 if (v == MigrationWatch.Verdict.CEILING) {
                     // "keeps answering" only when it does: A#259's ceiling came after 64 min of a silent shell
-                    long quietMin = (now - answered) / 60_000;
+                    long quietMin = (activeNow - answered) / 60_000;
                     throw new IOException("DataMigration is still not done after " + min + " min, "
                             + (quietMin >= 15 ? "and iOS's console has not answered for " + quietMin + " min"
                                     : "although iOS keeps answering") + ". Tap Resume to redo this boot.");
                 }
                 if (v != MigrationWatch.Verdict.WAIT) {
-                    throw stalled(c, serial, watch, v, now, min, framesShown(c),
-                            SetupTick.pollText(poll, o != null, watch.silentMin(now)) + ", " + hostText(c, late.takeMax()));
+                    throw stalled(c, serial, watch, v, activeNow, min, framesShown(c),
+                            SetupTick.pollText(poll, o != null, watch.silentMin(activeNow)) + ", " + hostText(c, late.takeMax()));
                 }
                 long slept0 = android.os.SystemClock.elapsedRealtime();
                 sleep(30_000);
