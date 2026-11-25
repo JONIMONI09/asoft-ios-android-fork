@@ -1042,23 +1042,84 @@ final class Guest {
 
     /** Drops a saved state; with iOS running through QMP, else with qemu-img. Not on the UI thread. */
     static String deleteSnapshot(Context c, String tag) {
-        savedLedsFile(c, tag).delete();
-        savedCpusFile(c, tag).delete();
-        savedClockFile(c, tag).delete();
-        savedRamFile(c, tag).delete();
-        savedNoKbdFile(c, tag).delete();
+        return deleteSnapshot(c, os(c), tag);
+    }
+
+    /** Drops a saved state for @forOs; uses QMP if @forOs is running, else qemu-img. Not on the UI thread. */
+    static String deleteSnapshot(Context c, int forOs, String tag) {
+        String prefix = diskName(c, forOs) + ".";
+        new File(c.getFilesDir(), prefix + tag + ".leds").delete();
+        new File(c.getFilesDir(), prefix + tag + ".cpus").delete();
+        new File(c.getFilesDir(), prefix + tag + ".clock").delete();
+        new File(c.getFilesDir(), prefix + tag + ".ram").delete();
+        new File(c.getFilesDir(), prefix + tag + ".nokbd").delete();
         Qmp q = qmp;
-        if (running() && q != null) {
+        if (running() && runningOs == forOs && q != null) {
             String r = q.hmp("delvm " + tag, 60000);
             return r != null && r.replace(" ", "").equals("{\"return\":\"\"}") ? null : "delvm: " + r;
         }
+        File disk = userDisk(c, forOs);
+        if (!disk.isFile()) {
+            return null;
+        }
         try {
-            String[] r = Emu.qemuImg(c, "snapshot", "-d", tag, userDisk(c).getPath());
+            String[] r = Emu.qemuImg(c, "snapshot", "-d", tag, disk.getPath());
             // gone already counts as deleted
             return "0".equals(r[0]) || r[1].contains("not found") ? null : r[1].trim();
         } catch (IOException e) {
             return e.toString();
         }
+    }
+
+    /** Outcome of {@link #deleteAllSnapshots(Context, int)}. */
+    static final class DeleteAllResult {
+        final int found;
+        final int deleted;
+        final List<String> tags;
+        final String error;
+
+        DeleteAllResult(int found, int deleted, List<String> tags, String error) {
+            this.found = found;
+            this.deleted = deleted;
+            this.tags = tags;
+            this.error = error;
+        }
+    }
+
+    /**
+     * Finds and deletes every saved state (quick saves and named saves) for @forOs.
+     * Not on the UI thread. Never deletes the installed OS or user disk itself.
+     */
+    static DeleteAllResult deleteAllSnapshots(Context c, int forOs) {
+        List<Snap> saves = snapshots(c, forOs);
+        java.util.LinkedHashSet<String> listed = new java.util.LinkedHashSet<>();
+        for (Snap s : saves) {
+            if (s.tag != null && !s.tag.isEmpty()) {
+                listed.add(s.tag);
+            }
+        }
+        java.util.LinkedHashSet<String> targets = new java.util.LinkedHashSet<>(listed);
+        targets.add(QUICK);
+        targets.add(QUICK_B);
+        int deleted = 0;
+        String firstErr = null;
+        List<String> deletedTags = new ArrayList<>();
+        for (String tag : targets) {
+            String err = deleteSnapshot(c, forOs, tag);
+            if (err == null) {
+                if (listed.contains(tag)) {
+                    deleted++;
+                    deletedTags.add(tag);
+                }
+            } else if (firstErr == null) {
+                firstErr = tag + ": " + err;
+            }
+        }
+        setQuickStale(c, forOs, firstErr != null);
+        AppLog.note(c, "saves: deleteAll(" + osName(forOs) + ") found=" + listed.size()
+                + " deleted=" + deleted + " [" + String.join(", ", deletedTags) + "]"
+                + (firstErr != null ? " err=" + firstErr : ""));
+        return new DeleteAllResult(listed.size(), deleted, deletedTags, firstErr);
     }
 
     /** Both quick slots (deleteSnapshot counts a missing one as deleted): null when both are gone, else why not. */
