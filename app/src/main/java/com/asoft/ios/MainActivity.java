@@ -1240,7 +1240,7 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    /** Scans all saved states for @os off the UI thread and lets the user delete all saves or boot without save. */
+    /** Interactive Save Manager: list every save, select individual saves to rename or delete (with verification), or delete all. */
     private void askManageSaves(int os) {
         if (Guest.saving()) {
             Toast.makeText(this, "A save is currently in progress: wait until it finishes.", Toast.LENGTH_LONG).show();
@@ -1249,42 +1249,68 @@ public class MainActivity extends Activity {
         String name = systemName(os);
         new Thread(() -> {
             java.util.List<Guest.Snap> list = Guest.snapshots(this, os);
+            File disk = Guest.userDisk(this, os);
+            long diskBytes = disk.isFile() ? disk.length() : 0L;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) {
                     return;
                 }
-                StringBuilder msg = new StringBuilder();
+                LinearLayout box = new LinearLayout(this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setPadding(dp(20), dp(12), dp(20), dp(8));
+
+                TextView info = new TextView(this);
                 if (list.isEmpty()) {
-                    msg.append("No saved states found for ").append(name).append(".");
+                    info.setText("No saved states found for " + name + ".\nUser disk size: " + size(diskBytes) + ".");
                 } else {
-                    msg.append("Found ").append(list.size()).append(" saved state")
-                            .append(list.size() == 1 ? "" : "s").append(" for ").append(name).append(":\n\n");
-                    for (Guest.Snap s : list) {
-                        msg.append("• ").append(s.label()).append(" (").append(s.tag)
-                                .append(")\n   ").append(s.date).append(" · ").append(s.size).append("\n");
-                    }
-                    msg.append("\nDeleting all saves frees snapshot space and prevents broken quick-saves from auto-loading. ")
-                            .append(name).append(" itself and your user disk stay intact.");
+                    info.setText("Found " + list.size() + " save" + (list.size() == 1 ? "" : "s")
+                            + " for " + name + " (user disk: " + size(diskBytes) + ").\n"
+                            + "Tap any save below to rename it or delete it individually.");
                 }
+                info.setTextSize(13);
+                info.setPadding(0, 0, 0, dp(12));
+                box.addView(info);
+
+                final AlertDialog[] dlg = new AlertDialog[1];
+                for (Guest.Snap s : list) {
+                    String display = Guest.saveDisplayName(this, os, s.tag, s.label());
+                    android.widget.Button row = new android.widget.Button(this);
+                    row.setAllCaps(false);
+                    row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                    row.setText(display + "\n" + s.tag + " · " + s.date + " · " + s.size);
+                    row.setOnClickListener(v -> {
+                        if (dlg[0] != null) {
+                            dlg[0].dismiss();
+                        }
+                        askSingleSaveAction(os, s);
+                    });
+                    box.addView(row);
+                }
+
+                ScrollView scroll = new ScrollView(this);
+                scroll.addView(box);
                 AlertDialog.Builder b = new AlertDialog.Builder(this)
-                        .setTitle("Saves — " + name)
-                        .setMessage(msg.toString())
+                        .setTitle("Manage saves — " + name)
+                        .setView(scroll)
                         .setNegativeButton("Close", null);
                 if (!list.isEmpty()) {
-                    b.setPositiveButton("Delete all saves (" + list.size() + ")", (d, w) ->
+                    b.setPositiveButton("Delete all (" + list.size() + ")", (d, w) ->
                             new AlertDialog.Builder(this)
                                     .setTitle("Delete all " + list.size() + " save(s)?")
-                                    .setMessage("All saved states for " + name + " will be permanently deleted. "
+                                    .setMessage("All saved states and snapshot metadata for " + name
+                                            + " will be permanently deleted from the app's disk. "
                                             + name + " itself stays installed.")
                                     .setPositiveButton("Delete all", (d2, w2) -> new Thread(() -> {
                                         Guest.DeleteAllResult res = Guest.deleteAllSnapshots(this, os);
+                                        int remaining = Guest.snapshots(this, os).size();
                                         runOnUiThread(() -> {
                                             if (isFinishing() || isDestroyed()) {
                                                 return;
                                             }
                                             Toast.makeText(this, res.error != null
-                                                    ? "Deleted " + res.deleted + " of " + res.found + " saves (error: " + res.error + ")"
-                                                    : "Deleted all " + res.deleted + " save(s)",
+                                                    ? "Deleted " + res.deleted + " of " + res.found
+                                                            + " saves (remaining: " + remaining + ", error: " + res.error + ")"
+                                                    : "Deleted all " + res.deleted + " save(s) — verified " + remaining + " remaining",
                                                     Toast.LENGTH_LONG).show();
                                             shown = "";
                                             refresh();
@@ -1296,9 +1322,78 @@ public class MainActivity extends Activity {
                 if (!Guest.running()) {
                     b.setNeutralButton("Boot without save", (d, w) -> bootCold(os));
                 }
-                b.show();
+                dlg[0] = b.show();
             });
         }, "home-list-saves").start();
+    }
+
+    /** Actions for one selected save in the Save Manager: rename or permanently delete (verified). */
+    private void askSingleSaveAction(int os, Guest.Snap snap) {
+        String display = Guest.saveDisplayName(this, os, snap.tag, snap.label());
+        new AlertDialog.Builder(this)
+                .setTitle(display)
+                .setMessage("Snapshot tag: " + snap.tag + "\nDate: " + snap.date + "\nSize: " + snap.size
+                        + "\n\nYou can rename this save's display name or permanently delete it from the app's qcow2 disk and metadata.")
+                .setPositiveButton("Rename…", (d, w) -> askRenameSave(os, snap))
+                .setNeutralButton("Delete save", (d, w) -> new AlertDialog.Builder(this)
+                        .setTitle("Delete \"" + display + "\"?")
+                        .setMessage("Permanently remove snapshot \"" + snap.tag + "\" (" + snap.size
+                                + ") and all its metadata files from app storage?")
+                        .setPositiveButton("Delete", (d2, w2) -> new Thread(() -> {
+                            String err = Guest.deleteSnapshot(this, os, snap.tag);
+                            java.util.List<Guest.Snap> after = Guest.snapshots(this, os);
+                            boolean stillPresent = false;
+                            for (Guest.Snap x : after) {
+                                if (snap.tag.equals(x.tag)) {
+                                    stillPresent = true;
+                                    break;
+                                }
+                            }
+                            final boolean gone = !stillPresent && err == null;
+                            final int left = after.size();
+                            runOnUiThread(() -> {
+                                if (isFinishing() || isDestroyed()) {
+                                    return;
+                                }
+                                Toast.makeText(this, gone
+                                        ? "Deleted \"" + display + "\" (verified gone, " + left + " save(s) left)"
+                                        : "Delete issue: " + (err != null ? err : "snapshot still listed"),
+                                        Toast.LENGTH_LONG).show();
+                                shown = "";
+                                refresh();
+                                askManageSaves(os);
+                            });
+                        }, "home-delete-one-save").start())
+                        .setNegativeButton("Cancel", null)
+                        .show())
+                .setNegativeButton("Back", (d, w) -> askManageSaves(os))
+                .show();
+    }
+
+    /** Renames a save's persistent display name (stored via commit() without rewriting the qcow2 disk). */
+    private void askRenameSave(int os, Guest.Snap snap) {
+        String current = Guest.saveDisplayName(this, os, snap.tag, snap.label());
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setSingleLine(true);
+        input.setText(current);
+        input.selectAll();
+        LinearLayout pad = new LinearLayout(this);
+        pad.setPadding(dp(20), dp(12), dp(20), 0);
+        pad.addView(input, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        new AlertDialog.Builder(this)
+                .setTitle("Rename save")
+                .setMessage("Set a custom display name for snapshot \"" + snap.tag + "\" (leave blank to restore default):")
+                .setView(pad)
+                .setPositiveButton("Save name", (d, w) -> {
+                    String next = input.getText().toString().trim();
+                    Guest.setSaveDisplayName(this, os, snap.tag, next);
+                    Toast.makeText(this, next.isEmpty() ? "Restored default name" : "Renamed to \"" + next + "\"",
+                            Toast.LENGTH_SHORT).show();
+                    askManageSaves(os);
+                })
+                .setNegativeButton("Cancel", (d, w) -> askManageSaves(os))
+                .show();
     }
 
     private void bootCold(int os) {

@@ -41,7 +41,7 @@ final class Guest {
     }
 
     static void select(Context c, int os) {
-        c.getSharedPreferences("guest", Context.MODE_PRIVATE).edit().putInt("os", os).apply();
+        c.getSharedPreferences("guest", Context.MODE_PRIVATE).edit().putInt("os", os).commit();
     }
 
     /** The iOS the screens are about: the running one, else the one chosen last. */
@@ -563,7 +563,7 @@ final class Guest {
     private static final String SCALE26_KEY = "ios26-scale";
 
     static void setScale26(Context c, int scale) {
-        c.getSharedPreferences("guest", Context.MODE_PRIVATE).edit().putInt(SCALE26_KEY, scale == 2 ? 2 : 3).apply();
+        c.getSharedPreferences("guest", Context.MODE_PRIVATE).edit().putInt(SCALE26_KEY, scale == 2 ? 2 : 3).commit();
     }
 
     /**
@@ -606,7 +606,7 @@ final class Guest {
     static void setRamMiB(Context c, int forOs, int mib) {
         // a new size: a size accepted by a Go back no longer counts (keptRamKey)
         c.getSharedPreferences("guest", Context.MODE_PRIVATE).edit().putInt(ramKey(forOs), mib)
-                .remove(keptRamKey(c, forOs)).apply();
+                .remove(keptRamKey(c, forOs)).commit();
     }
 
     /** The RAM (MiB) the running iOS 16, iOS 26 or watch booted with, or loaded a save of (kept with each save). */
@@ -1045,6 +1045,28 @@ final class Guest {
         return deleteSnapshot(c, os(c), tag);
     }
 
+    /** Persistent custom display name for a save tag (does not modify the underlying qcow2 tag). */
+    static String saveDisplayName(Context c, int forOs, String tag, String fallback) {
+        String key = diskName(c, forOs) + "." + tag;
+        String custom = c.getSharedPreferences("save_names", Context.MODE_PRIVATE).getString(key, null);
+        return (custom != null && !custom.trim().isEmpty()) ? custom.trim() : fallback;
+    }
+
+    static void setSaveDisplayName(Context c, int forOs, String tag, String name) {
+        String key = diskName(c, forOs) + "." + tag;
+        android.content.SharedPreferences.Editor ed = c.getSharedPreferences("save_names", Context.MODE_PRIVATE).edit();
+        if (name == null || name.trim().isEmpty()) {
+            ed.remove(key);
+        } else {
+            ed.putString(key, name.trim());
+        }
+        ed.commit();
+    }
+
+    static void clearSaveDisplayName(Context c, int forOs, String tag) {
+        setSaveDisplayName(c, forOs, tag, null);
+    }
+
     /** Drops a saved state for @forOs; uses QMP if @forOs is running, else qemu-img. Not on the UI thread. */
     static String deleteSnapshot(Context c, int forOs, String tag) {
         String prefix = diskName(c, forOs) + ".";
@@ -1053,6 +1075,7 @@ final class Guest {
         new File(c.getFilesDir(), prefix + tag + ".clock").delete();
         new File(c.getFilesDir(), prefix + tag + ".ram").delete();
         new File(c.getFilesDir(), prefix + tag + ".nokbd").delete();
+        clearSaveDisplayName(c, forOs, tag);
         Qmp q = qmp;
         if (running() && runningOs == forOs && q != null) {
             String r = q.hmp("delvm " + tag, 60000);

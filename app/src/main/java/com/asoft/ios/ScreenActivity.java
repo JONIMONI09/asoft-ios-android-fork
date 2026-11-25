@@ -360,6 +360,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         pinButton = barButton(R.drawable.ic_bar_pin, "Pin the app: Android's edge swipes stay away from iOS", this::togglePin);
         barItems.addView(pinButton);
         barItems.addView(barButton(R.drawable.ic_bar_save, "Saves", this::openSaves));
+        barItems.addView(barButton(R.drawable.ic_bar_terminal, "iOS Live Terminal", () -> LiveTerminalDialog.show(this)));
         bar.addView(barItems);
         barItems.setVisibility(getSharedPreferences("guest", MODE_PRIVATE).getBoolean("bar-open", false) ? View.VISIBLE : View.GONE);
         this.bar = bar;
@@ -594,7 +595,8 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             int os = Guest.os(this);
             boolean back = Guest.isQuick(snap.tag) && (wayBack || Guest.otherHardware(this, os, snap.tag));
-            row.setText((back ? "Go back to the save of " + when(snap) : snap.label())
+            String display = Guest.saveDisplayName(this, os, snap.tag, snap.label());
+            row.setText((back ? "Go back to the save of " + when(snap) : display)
                     + "\n" + snap.date + " · " + snap.size + " · " + Guest.hardware(this, os, snap.tag));
             row.setOnClickListener(v -> {
                 dialog[0].dismiss();
