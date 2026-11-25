@@ -2411,7 +2411,6 @@ final class Guest {
                 "-chardev", "socket,id=con,path=" + new File(run, "console.sock").getPath() + ",server=on,wait=off,logfile="
                         + new File(run, "serial.txt").getPath(),
                 "-serial", "chardev:con",
-                "-d", "guest_errors,unimp", "-D", new File(run, "qemu.log").getPath(),
                 "-cpu", watch ? WatchProfile.CPU : ov.getOrDefault("cpu", CPU26),
                 "-smp", String.valueOf(smp), "-accel", "tcg,thread=multi,tb-size=" + PerfConfig.load(c).tbSizeMiB,
                 // cache=none (O_DIRECT), as iOS 16's: a save's 4 GB do not go through the page cache (lmkd).
@@ -2429,6 +2428,13 @@ final class Guest {
                                 ? ",iothread=disk" : ""),
                 "-qmp", "unix:" + qmpPath(c) + ",server,nowait",
                 "-device", "qemu-xhci,id=xhci,conditional-intr-mapping=on,nonremovable=2"));
+        PerfConfig perfCfg = PerfConfig.load(c);
+        if (!perfCfg.disableQemuLog) {
+            cmd.add("-d");
+            cmd.add("guest_errors,unimp");
+            cmd.add("-D");
+            cmd.add(new File(run, "qemu.log").getPath());
+        }
         // iOS 26 without a USB keyboard, so that iOS shows its own (kbd26); a save made with one loads with it
         boolean kbd = watch || sb != null || resumed && !savedNoKbdFile(c, loadTag).isFile();
         kbd26 = kbd;
@@ -2441,7 +2447,6 @@ final class Guest {
         cmd.add("usb-touchscreen,bus=xhci.0,port=2,id=utouch");
         AppLog.note(c, "keyboard: " + (!kbd ? "iOS's own (no USB keyboard)" : unplug26 ? "the save has a USB keyboard: unplugged once it runs"
                 : "a USB keyboard"));
-        PerfConfig perfCfg = PerfConfig.load(c);
         AppLog.note(c, "perf: " + perfCfg.summaryLine());
         if (watch) {
             WatchProfile.addButtons(cmd);
@@ -2494,7 +2499,7 @@ final class Guest {
             env.put("ASOFT_NATIVE_EL0", "1");
             env.put("ASOFT_NATIVE_EL0_TPIDRRO", "1");
             env.put("ASOFT_NATIVE_EL0_STUBS", watch ? WatchProfile.STUBS : String.valueOf(perfCfg.el0Stubs));
-            env.put("ASOFT_NATIVE_EL0_DELAY_MS", "20000");
+            env.put("ASOFT_NATIVE_EL0_DELAY_MS", watch ? "20000" : String.valueOf(perfCfg.el0DelayMs));
             env.put("ASOFT_NATIVE_EL0_PAC", "off");
             env.put("ASOFT_NATIVE_EL0_STATS", "1");
             env.put("ASOFT_NATIVE_EL0_OFF_FILE", new File(run, "native-off").getPath());

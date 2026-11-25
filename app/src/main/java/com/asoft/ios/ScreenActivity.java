@@ -102,6 +102,12 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     /** The pointer iOS has as its finger (both guests' touchscreens are single-touch), -1 when none; where it is (0..1). */
     private int finger = -1;
     private float fingerX, fingerY;
+    /** Optional live interaction latency tracker (gated on PerfConfig.liveLogInteractionTiming). */
+    private long interactDownMs;
+    private long interactUploadsAtDown;
+    private long interactFirstRespMs = -1;
+    private int interactMoves;
+    private boolean interactPendingTap;
     private final GameEnvGuard envGuard = new GameEnvGuard();
     /** ios26.txt touchlog=1 (debug builds): every MotionEvent and what went to iOS, in files/run/touch.txt. */
     private java.io.PrintWriter touchLog;
@@ -1401,6 +1407,29 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                     keepThumb(false);       // (a boot's black screen is not kept)
                 }
             }
+            if (PerfConfig.liveLogInteractionTiming) {
+                checkInteractionFrame();
+            }
+        }
+    }
+
+    /** Records first-frame response latency for active swipes and completed taps when timing logs are enabled. */
+    private void checkInteractionFrame() {
+        if (interactDownMs == 0) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        long uploads = Render.uploads();
+        if (interactFirstRespMs < 0 && uploads > interactUploadsAtDown) {
+            interactFirstRespMs = Math.max(0L, now - interactDownMs);
+            if (interactPendingTap) {
+                interactPendingTap = false;
+                interactDownMs = 0;
+                AppLog.note(this, "input: tap -> first frame " + interactFirstRespMs + " ms");
+            }
+        } else if (interactPendingTap && now - interactDownMs > 3000L) {
+            interactPendingTap = false;
+            interactDownMs = 0;
         }
     }
 
@@ -1521,6 +1550,9 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                     if (p[0] != fingerX || p[1] != fingerY) {
                         fingerX = p[0];
                         fingerY = p[1];
+                        if (PerfConfig.liveLogInteractionTiming && interactDownMs != 0) {
+                            interactMoves++;
+                        }
                         sendTouch(qmp, null, null);
                     }
                 }
@@ -1533,6 +1565,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                     fingerX = p[0];
                     fingerY = p[1];
                     sendTouch(qmp, false, null);
+                    finishInteractionTiming();
                     finger = -1;
                     for (int k = 0; k < e.getPointerCount(); k++) {
                         if (k != i) {
@@ -1552,6 +1585,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                         fingerY = p[1];
                     }
                     sendTouch(qmp, false, null);
+                    finishInteractionTiming();
                     finger = -1;
                 }
                 break;
@@ -1559,6 +1593,8 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 envGuard.logTouchCancelIfBurst(this, android.os.SystemClock.uptimeMillis());
                 if (finger != -1) {
                     sendTouch(qmp, false, "cancel");
+                    interactDownMs = 0;
+                    interactPendingTap = false;
                     finger = -1;
                 }
                 break;
@@ -1569,11 +1605,45 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         return true;
     }
 
+    private void finishInteractionTiming() {
+        if (!PerfConfig.liveLogInteractionTiming || interactDownMs == 0) {
+            interactDownMs = 0;
+            interactPendingTap = false;
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        long durMs = Math.max(1L, now - interactDownMs);
+        long frames = Math.max(0L, Render.uploads() - interactUploadsAtDown);
+        if (interactMoves > 2) {
+            double fps = frames * 1000.0 / durMs;
+            String resp = interactFirstRespMs >= 0 ? interactFirstRespMs + " ms" : "none";
+            AppLog.note(this, String.format(java.util.Locale.ROOT,
+                    "input: swipe %d ms (%d moves) -> %d frames (%.1f FPS), first response %s",
+                    durMs, interactMoves, frames, fps, resp));
+            interactDownMs = 0;
+            interactPendingTap = false;
+        } else if (interactFirstRespMs >= 0) {
+            AppLog.note(this, "input: tap -> first frame " + interactFirstRespMs + " ms");
+            interactDownMs = 0;
+            interactPendingTap = false;
+        } else {
+            // Wait up to 3 s in doFrame() for the tap's visual response frame
+            interactPendingTap = true;
+        }
+    }
+
     private void fingerDown(Qmp qmp, MotionEvent e, int index) {
         finger = e.getPointerId(index);
         float[] p = guestPoint(e.getX(index), e.getY(index));
         fingerX = p[0];
         fingerY = p[1];
+        if (PerfConfig.liveLogInteractionTiming) {
+            interactDownMs = android.os.SystemClock.uptimeMillis();
+            interactUploadsAtDown = Render.uploads();
+            interactFirstRespMs = -1;
+            interactMoves = 0;
+            interactPendingTap = false;
+        }
         sendTouch(qmp, true, null);
     }
 
