@@ -1091,13 +1091,7 @@ public class MainActivity extends Activity {
                 "How long after cold boot before native ARM64 user-space execution engages (ASOFT_NATIVE_EL0_DELAY_MS). Shorter values speed up late boot.",
                 delayLabels, indexOf(delayVals, cur.el0DelayMs));
 
-        // 8. Disable all extra logging (keep iOS serial only) [Live / Next start]
-        android.widget.CheckBox cbDisableQemuLog = addPerfCheck(box,
-                "Disable all extra logging (keep iOS serial only) [Live / Next start]",
-                "Disables QEMU guest_errors (qemu.log), App log (app.txt), KGSL/Vulkan traces, verbose engine logs, and tap/swipe timing logs to remove background flash I/O. Only iOS serial (serial.txt) stays active for the floating Terminal.",
-                cur.disableQemuLog);
-
-        // 9. Host Display Frame Cap [Live]
+        // 8. Host Display Frame Cap [Live]
         final int[] fpsVals = {0, 60, 30};
         final String[] fpsLabels = {
                 "Auto (native display Hz — default)",
@@ -1109,7 +1103,7 @@ public class MainActivity extends Activity {
                 "Limits how often Android polls and uploads the guest framebuffer. Capping at 60 FPS on 120–144 Hz gaming displays saves host CPU and reduces heat.",
                 fpsLabels, indexOf(fpsVals, cur.frameCapFps));
 
-        // 10. Touch Swipe Pacing [Live]
+        // 9. Touch Swipe Pacing [Live]
         final int[] touchVals = {PerfConfig.TOUCH_BALANCED, PerfConfig.TOUCH_RESPONSIVE, PerfConfig.TOUCH_LOW_OVERHEAD};
         final String[] touchLabels = {
                 "Balanced (16 / 66 ms — default)",
@@ -1121,20 +1115,20 @@ public class MainActivity extends Activity {
                 "Controls how quickly finger-move events are sent over QMP during swipes. Responsive reduces swipe delay; Low-overhead helps if swipes freeze under heavy CPU load.",
                 touchLabels, indexOf(touchVals, cur.touchPacing));
 
-        // 11. Log Tap & Swipe Timing [Live]
+        // 10. Log Tap & Swipe Timing [Live]
+        final boolean allLogsForcedOff = CompatConfig.load(this).disableAllLogging;
         android.widget.CheckBox cbLogTiming = addPerfCheck(box,
-                "Log tap & swipe response times [Live]",
-                "Records tap-to-frame latency (ms) and swipe FPS into app.txt (only available when extra logging is enabled).",
-                !cur.disableQemuLog && cur.logInteractionTiming);
-        cbLogTiming.setEnabled(!cur.disableQemuLog);
-        cbDisableQemuLog.setOnCheckedChangeListener((btn, isChecked) -> {
-            if (isChecked) {
-                cbLogTiming.setChecked(false);
-                cbLogTiming.setEnabled(false);
-            } else {
-                cbLogTiming.setEnabled(true);
-            }
-        });
+                allLogsForcedOff
+                        ? "Log tap & swipe response times [Disabled by Force disable ALL logging]"
+                        : "Log tap & swipe response times [Live]",
+                allLogsForcedOff
+                        ? "Locked OFF because \"Force disable ALL logging\" is enabled in Settings > iOS 26 GPU compatibility (#92)."
+                        : "Records tap-to-frame latency (ms) and swipe FPS into app.txt so you can measure improvements live in the floating Terminal.",
+                !allLogsForcedOff && cur.logInteractionTiming);
+        if (allLogsForcedOff) {
+            cbLogTiming.setEnabled(false);
+            cbLogTiming.setAlpha(0.55f);
+        }
 
         Runnable syncUi = () -> {
             spVcpus.setSelection(indexOf(vcpuVals, cur.vcpus));
@@ -1144,11 +1138,9 @@ public class MainActivity extends Activity {
             cbWriteback.setChecked(cur.diskWriteback);
             spStubs.setSelection(indexOf(stubVals, cur.el0Stubs));
             spDelay.setSelection(indexOf(delayVals, cur.el0DelayMs));
-            cbDisableQemuLog.setChecked(cur.disableQemuLog);
             spFps.setSelection(indexOf(fpsVals, cur.frameCapFps));
             spTouch.setSelection(indexOf(touchVals, cur.touchPacing));
-            cbLogTiming.setChecked(!cur.disableQemuLog && cur.logInteractionTiming);
-            cbLogTiming.setEnabled(!cur.disableQemuLog);
+            cbLogTiming.setChecked(!allLogsForcedOff && cur.logInteractionTiming);
         };
         btnBalanced.setOnClickListener(v -> {
             PerfConfig p = PerfConfig.balancedFast();
@@ -1180,16 +1172,11 @@ public class MainActivity extends Activity {
                     next.diskWriteback = cbWriteback.isChecked();
                     next.el0Stubs = stubVals[spStubs.getSelectedItemPosition()];
                     next.el0DelayMs = delayVals[spDelay.getSelectedItemPosition()];
-                    next.disableQemuLog = cbDisableQemuLog.isChecked();
+                    next.disableQemuLog = cur.disableQemuLog;
                     next.frameCapFps = fpsVals[spFps.getSelectedItemPosition()];
                     next.touchPacing = touchVals[spTouch.getSelectedItemPosition()];
-                    next.logInteractionTiming = !next.disableQemuLog && cbLogTiming.isChecked();
+                    next.logInteractionTiming = !allLogsForcedOff && cbLogTiming.isChecked();
                     PerfConfig.save(this, next);
-                    if (next.disableQemuLog) {
-                        File runDir = Guest.runDir(this);
-                        new File(runDir, "qemu.log").delete();
-                        new File(runDir, CompatConfig.TRACE_FILE).delete();
-                    }
                     notePerfChange(os, before, next);
                 })
                 .setNegativeButton("Cancel", null)
@@ -2356,21 +2343,44 @@ public class MainActivity extends Activity {
             listBox.addView(lockBanner);
         }
 
+        final boolean[] disableAllLogs = {cfg.disableAllLogging};
+        final android.widget.CheckBox[] boxes = new android.widget.CheckBox[labels.length];
+
+        android.widget.CheckBox cbDisableAll = new android.widget.CheckBox(this);
+        cbDisableAll.setText("Force disable ALL logging (zero logs & disables Terminal while iOS runs)");
+        cbDisableAll.setTypeface(Typeface.DEFAULT_BOLD);
+        cbDisableAll.setTextSize(14);
+        cbDisableAll.setChecked(disableAllLogs[0]);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        mlp.bottomMargin = dp(4);
+        listBox.addView(cbDisableAll, mlp);
+
+        TextView masterDesc = new TextView(this);
+        masterDesc.setText("Master switch: greys out and disables all logging options below, stops QEMU/App/iOS serial/KGSL log writes, and disables the floating Terminal while iOS runs.");
+        masterDesc.setTextSize(12);
+        masterDesc.setPadding(dp(32), 0, 0, dp(10));
+        listBox.addView(masterDesc);
+
         for (int i = 0; i < labels.length; i++) {
             final int idx = i;
             boolean lockedOn = affectedKgsl && (i == 3 || i == 4 || i == 5 || i == 6);
             boolean lockedOff = affectedKgsl && i == 0;
+            boolean isLogOpt = (i == 1 || i == 2 || i == 11);
+            boolean forcedLogOff = isLogOpt && disableAllLogs[0];
             android.widget.CheckBox cb = new android.widget.CheckBox(this);
             cb.setText(lockedOn ? labels[i] + " [Required — locked ON]"
                     : lockedOff ? labels[i] + " [Locked OFF for this GPU]"
+                    : forcedLogOff ? labels[i] + " [Disabled by Force disable ALL logging]"
                     : labels[i]);
             cb.setTextSize(14);
-            cb.setChecked(lockedOn || (!lockedOff && checked[i]));
+            cb.setChecked(lockedOn || (!lockedOff && !forcedLogOff && checked[i]));
             checked[i] = cb.isChecked();
-            if (lockedOn || lockedOff) {
+            if (lockedOn || lockedOff || forcedLogOff) {
                 cb.setEnabled(false);
                 cb.setAlpha(0.55f);
-            } else {
+            }
+            if (!lockedOn && !lockedOff) {
                 cb.setOnCheckedChangeListener((btn, isChecked) -> {
                     checked[idx] = isChecked;
                     if (isChecked) {
@@ -2378,11 +2388,34 @@ public class MainActivity extends Activity {
                     }
                 });
             }
+            boxes[i] = cb;
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             lp.topMargin = dp(4);
             listBox.addView(cb, lp);
         }
+
+        cbDisableAll.setOnCheckedChangeListener((btn, isChecked) -> {
+            disableAllLogs[0] = isChecked;
+            for (int logIdx : new int[] {1, 2, 11}) {
+                android.widget.CheckBox logCb = boxes[logIdx];
+                if (logCb == null) {
+                    continue;
+                }
+                if (isChecked) {
+                    checked[logIdx] = false;
+                    logCb.setChecked(false);
+                    logCb.setEnabled(false);
+                    logCb.setAlpha(0.55f);
+                    logCb.setText(labels[logIdx] + " [Disabled by Force disable ALL logging]");
+                } else {
+                    logCb.setEnabled(true);
+                    logCb.setAlpha(1.0f);
+                    logCb.setText(labels[logIdx]);
+                }
+            }
+        });
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(listBox);
 
@@ -2390,9 +2423,10 @@ public class MainActivity extends Activity {
                 .setCustomTitle(titleRow)
                 .setView(scroll)
                 .setPositiveButton("Save", (d, w) -> {
+                    cfg.disableAllLogging = disableAllLogs[0];
                     cfg.vanillaFallback = checked[0];
-                    cfg.kgslTrace = checked[1];
-                    cfg.syncLogging = checked[2];
+                    cfg.kgslTrace = !disableAllLogs[0] && checked[1];
+                    cfg.syncLogging = !disableAllLogs[0] && checked[2];
                     cfg.multiVmaBounce = checked[3];
                     cfg.kgslCacheSync = checked[4];
                     cfg.featureGuard = checked[5];
@@ -2401,11 +2435,19 @@ public class MainActivity extends Activity {
                     cfg.allHostBounce = checked[8];
                     cfg.importThreadAlways = checked[9];
                     cfg.tuDebugSafe = checked[10];
-                    cfg.verboseEngineLogs = checked[11];
+                    cfg.verboseEngineLogs = !disableAllLogs[0] && checked[11];
                     CompatConfig.save(this, cfg);
                     CompatConfig.markGpuPromptHandled(this);
+                    if (cfg.disableAllLogging) {
+                        File runDir = Guest.runDir(this);
+                        new File(runDir, "qemu.log").delete();
+                        new File(runDir, "serial.txt").delete();
+                        new File(runDir, CompatConfig.TRACE_FILE).delete();
+                    }
                     showSettings();
-                    Toast.makeText(this, "Applies on next iOS 26 start", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, cfg.disableAllLogging
+                            ? "All logging force-disabled (Terminal & live logs off now; QEMU/serial on next start)"
+                            : "Applies on next iOS 26 start", Toast.LENGTH_LONG).show();
                 })
                 .setNeutralButton(affectedKgsl ? "Reset optional" : "Reset (all off)", (d, w) -> {
                     CompatConfig.resetDefaults(this);

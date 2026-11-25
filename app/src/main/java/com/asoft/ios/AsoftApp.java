@@ -15,6 +15,7 @@ public class AsoftApp extends Application {
         // and its check says so itself
         String proc = Application.getProcessName();
         if (getPackageName().equals(proc)) {
+            CompatConfig.load(this);
             PerfConfig.load(this);
             AppExit.onStart(this);
             FreezeWatchdog.install(this);

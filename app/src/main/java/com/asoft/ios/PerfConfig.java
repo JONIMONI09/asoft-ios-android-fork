@@ -138,8 +138,7 @@ final class PerfConfig {
 
     static void applyLive(PerfConfig p) {
         liveFrameCapFps = sanitizeFrameCap(p.frameCapFps);
-        liveDisableExtraLogs = p.disableQemuLog;
-        liveLogInteractionTiming = !p.disableQemuLog && p.logInteractionTiming;
+        liveLogInteractionTiming = !CompatConfig.liveDisableAllLogging && p.logInteractionTiming;
         switch (sanitizeTouchPacing(p.touchPacing)) {
             case TOUCH_RESPONSIVE:
                 liveTouchMinGapMs = 8;
