@@ -2087,7 +2087,7 @@ final class Guest {
                 "-display", "none", "-monitor", "none", "-parallel", "none",
                 "-device", "ramfb", "-device", "virtio-keyboard-device", "-device", "virtio-tablet-device",
                 "-qmp", "unix:" + qmpPath(c) + ",server,nowait",
-                "-serial", "file:" + new File(run, "serial.txt").getPath(),
+                "-serial", CompatConfig.load(c).disableAllLogging ? "null" : "file:" + new File(run, "serial.txt").getPath(),
                 "-no-reboot", "-nic", "none",
                 "-device", "loader,file=" + new File(g, "ram.bin").getPath() + ",addr=0x" + Long.toHexString(KERNEL_PA) + ",force-raw=on",
                 "-device", "loader,file=" + new File(g, "stub.bin").getPath() + ",addr=0x" + Long.toHexString(STUB_PA) + ",force-raw=on",
@@ -2099,13 +2099,14 @@ final class Guest {
                 // cache that filled the phone's memory and lmkd killed the app (QEMU with it) mid-save
                 "-drive", "file=" + userDisk(c).getPath() + ",if=none,id=root,cache=none,format=qcow2",
                 "-device", "virtio-blk-device,drive=root"));
-        if (!PerfConfig.load(c).disableQemuLog) {
+        if (!CompatConfig.load(c).disableAllLogging) {
             cmd.add("-d");
             cmd.add("guest_errors,unimp");
             cmd.add("-D");
             cmd.add(new File(run, "qemu.log").getPath());
         } else {
             new File(run, "qemu.log").delete();
+            new File(run, "serial.txt").delete();
         }
         if (resumed) {
             cmd.add("-loadvm");
@@ -2424,11 +2425,10 @@ final class Guest {
                         // ios26.txt bootargs=... (debug builds): more boot-args for one start; a save keeps the ones it booted with
                         + (ov.containsKey("bootargs") ? " " + ov.get("bootargs") : ""),
                 "-display", "none", "-monitor", "none", "-parallel", "none",
-                // the guest's root shell (bash on the serial console) on files/run/console.sock, still logged to
-                // serial.txt: the setup's commands, Turn off's sync (powerOff), and adb (run-as + toybox nc -U). With no
-                // client QEMU drops the console's output there (wait=off), so nothing waits on it
-                "-chardev", "socket,id=con,path=" + new File(run, "console.sock").getPath() + ",server=on,wait=off,logfile="
-                        + new File(run, "serial.txt").getPath(),
+                // the guest's root shell (bash on the serial console) on files/run/console.sock, logged to
+                // serial.txt unless Force disable ALL logging is enabled on a normal run (setup always keeps serial.txt).
+                "-chardev", "socket,id=con,path=" + new File(run, "console.sock").getPath() + ",server=on,wait=off"
+                        + (sb == null && CompatConfig.load(c).disableAllLogging ? "" : ",logfile=" + new File(run, "serial.txt").getPath()),
                 "-serial", "chardev:con",
                 "-cpu", watch ? WatchProfile.CPU : ov.getOrDefault("cpu", CPU26),
                 "-smp", String.valueOf(smp), "-accel", "tcg,thread=multi,tb-size=" + PerfConfig.load(c).tbSizeMiB,
@@ -2448,13 +2448,15 @@ final class Guest {
                 "-qmp", "unix:" + qmpPath(c) + ",server,nowait",
                 "-device", "qemu-xhci,id=xhci,conditional-intr-mapping=on,nonremovable=2"));
         PerfConfig perfCfg = PerfConfig.load(c);
-        if (!perfCfg.disableQemuLog) {
+        boolean disableAllLogs = sb == null && CompatConfig.load(c).disableAllLogging;
+        if (!disableAllLogs) {
             cmd.add("-d");
             cmd.add("guest_errors,unimp");
             cmd.add("-D");
             cmd.add(new File(run, "qemu.log").getPath());
         } else {
             new File(run, "qemu.log").delete();
+            new File(run, "serial.txt").delete();
             new File(run, CompatConfig.TRACE_FILE).delete();
         }
         // iOS 26 without a USB keyboard, so that iOS shows its own (kbd26); a save made with one loads with it
@@ -2559,12 +2561,7 @@ final class Guest {
         env.putAll(ImportMode.envAdditions(compat26 && sys, importMarkerAtStart, ov));
         boolean ios26Compat = !watch && compat26;
         CompatConfig.setCompatRunActive(ios26Compat);
-        CompatConfig.Config compatCfg = CompatConfig.load(c).copy();
-        if (perfCfg.disableQemuLog) {
-            compatCfg.kgslTrace = false;
-            compatCfg.syncLogging = false;
-            compatCfg.verboseEngineLogs = false;
-        }
+        CompatConfig.Config compatCfg = CompatConfig.load(c);
         boolean icdShimmed = CompatConfig.shouldUseIcdShim(ios26Compat, sys, compatCfg);
         if (icdShimmed && !ov.containsKey("env.VK_DRIVER_FILES")) {
             File shimIcd = writeShimmedVulkanIcd(c);

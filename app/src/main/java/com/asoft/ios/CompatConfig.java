@@ -29,6 +29,7 @@ final class CompatConfig {
     static final String KEY_IMPORT_THREAD_ALWAYS = "import_thread_always";
     static final String KEY_TU_DEBUG_SAFE = "tu_debug_safe";
     static final String KEY_VERBOSE_ENGINE_LOGS = "verbose_engine_logs";
+    static final String KEY_DISABLE_ALL_LOGGING = "disable_all_logging";
     static final String KEY_GPU_PROMPT_HANDLED = "gpu_prompt_handled";
 
     static final String TRACE_FILE = "kgsl-trace.txt";
@@ -37,6 +38,8 @@ final class CompatConfig {
 
     /** True only while an iOS 26 / watchOS compat run is active; scopes AppLog fsync strictly to compat runs. */
     private static volatile boolean compatRunActive;
+    /** Live-updated master switch: when true, ALL logging (app, QEMU, iOS serial, KGSL, timing, Terminal) is force-disabled. */
+    static volatile boolean liveDisableAllLogging;
 
     private CompatConfig() {}
 
@@ -54,6 +57,7 @@ final class CompatConfig {
         boolean importThreadAlways = false;
         boolean tuDebugSafe = false;
         boolean verboseEngineLogs = false;
+        boolean disableAllLogging = false;
 
         /** Stock defaults: everything off until opted in. */
         static Config safeDefaults() {
@@ -104,6 +108,7 @@ final class CompatConfig {
             c.importThreadAlways = importThreadAlways;
             c.tuDebugSafe = tuDebugSafe;
             c.verboseEngineLogs = verboseEngineLogs;
+            c.disableAllLogging = disableAllLogging;
             return c;
         }
 
@@ -135,6 +140,7 @@ final class CompatConfig {
     /**
      * Enforces the four core Issue #92 KGSL freeze protections on affected Snapdragon GPUs so users
      * cannot accidentally disable them and trigger an Android kernel freeze / device reboot.
+     * Also enforces that all logging toggles stay OFF when {@code disableAllLogging} is enabled.
      */
     static Config enforceRequired(Config cfg, boolean affectedKgsl) {
         if (cfg == null) {
@@ -146,6 +152,11 @@ final class CompatConfig {
             cfg.kgslCacheSync = true;
             cfg.featureGuard = true;
             cfg.submitThrottle = true;
+        }
+        if (cfg.disableAllLogging) {
+            cfg.kgslTrace = false;
+            cfg.syncLogging = false;
+            cfg.verboseEngineLogs = false;
         }
         return cfg;
     }
@@ -168,7 +179,10 @@ final class CompatConfig {
         cfg.importThreadAlways = p.getBoolean(KEY_IMPORT_THREAD_ALWAYS, false);
         cfg.tuDebugSafe = p.getBoolean(KEY_TU_DEBUG_SAFE, false);
         cfg.verboseEngineLogs = p.getBoolean(KEY_VERBOSE_ENGINE_LOGS, false);
-        return enforceRequired(cfg, isAffectedKgslGpu(c));
+        cfg.disableAllLogging = p.getBoolean(KEY_DISABLE_ALL_LOGGING, false);
+        Config safe = enforceRequired(cfg, isAffectedKgslGpu(c));
+        liveDisableAllLogging = safe.disableAllLogging;
+        return safe;
     }
 
     static void save(Context c, Config cfg) {
@@ -176,6 +190,10 @@ final class CompatConfig {
             return;
         }
         Config safe = enforceRequired(cfg.copy(), isAffectedKgslGpu(c));
+        liveDisableAllLogging = safe.disableAllLogging;
+        if (safe.disableAllLogging) {
+            PerfConfig.liveLogInteractionTiming = false;
+        }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean(KEY_VANILLA_FALLBACK, safe.vanillaFallback)
                 .putBoolean(KEY_KGSL_TRACE, safe.kgslTrace)
@@ -189,6 +207,7 @@ final class CompatConfig {
                 .putBoolean(KEY_IMPORT_THREAD_ALWAYS, safe.importThreadAlways)
                 .putBoolean(KEY_TU_DEBUG_SAFE, safe.tuDebugSafe)
                 .putBoolean(KEY_VERBOSE_ENGINE_LOGS, safe.verboseEngineLogs)
+                .putBoolean(KEY_DISABLE_ALL_LOGGING, safe.disableAllLogging)
                 .commit();
     }
 
@@ -314,7 +333,7 @@ final class CompatConfig {
         if (cfg.kgslTrace && cfg.syncLogging && on == 2) {
             return "KGSL trace + sync logs";
         }
-        return on + " active";
+        return on + " active" + (cfg.disableAllLogging ? " (all logs off)" : "");
     }
 
     static int countActive(Config cfg) {
@@ -333,6 +352,7 @@ final class CompatConfig {
         if (cfg.importThreadAlways) n++;
         if (cfg.tuDebugSafe) n++;
         if (cfg.verboseEngineLogs) n++;
+        if (cfg.disableAllLogging) n++;
         return n;
     }
 
@@ -352,7 +372,8 @@ final class CompatConfig {
                 + ", lazyViews=" + (cfg.lazySurfacesOff ? "lists" : "default")
                 + ", tuThread=" + (cfg.importThreadAlways ? "always" : "default")
                 + ", tuDebug=" + (cfg.tuDebugSafe ? SAFE_TU_DEBUG : "off")
-                + ", verboseLog=" + b(cfg.verboseEngineLogs);
+                + ", verboseLog=" + b(cfg.verboseEngineLogs)
+                + ", disableAllLogs=" + b(cfg.disableAllLogging);
     }
 
     private static String b(boolean v) {

@@ -174,4 +174,24 @@ public class CompatConfigTest {
         assertTrue(unaffected.vanillaFallback);
         assertFalse(unaffected.multiVmaBounce);
     }
+
+    @Test
+    public void disableAllLoggingForcesLoggingOffWhileKeepingKgslProtections() {
+        CompatConfig.Config cfg = CompatConfig.Config.safeDefaults();
+        cfg.kgslTrace = true;
+        cfg.syncLogging = true;
+        cfg.verboseEngineLogs = true;
+        cfg.disableAllLogging = true;
+        CompatConfig.enforceRequired(cfg, true);
+        assertTrue(cfg.disableAllLogging);
+        assertFalse(cfg.kgslTrace);
+        assertFalse(cfg.syncLogging);
+        assertFalse(cfg.verboseEngineLogs);
+        // Core Issue #92 protections stay locked ON
+        assertTrue(cfg.multiVmaBounce);
+        assertTrue(cfg.kgslCacheSync);
+        assertTrue(cfg.featureGuard);
+        assertTrue(cfg.submitThrottle);
+        assertTrue(CompatConfig.summary(cfg).contains("all logs off"));
+    }
 }

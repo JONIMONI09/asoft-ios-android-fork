@@ -75,9 +75,6 @@ final class LiveTerminalDialog {
         List<Source> list = new ArrayList<>();
         list.add(new Source("iOS Serial (serial.txt)",
                 new File(run, "serial.txt"), new File(logDir, "last-serial.txt"), null));
-        if (perf.disableQemuLog) {
-            return list;
-        }
         list.add(new Source("App log (app.txt)",
                 new File(run, "app.txt"), new File(logDir, "app.txt"), null));
         list.add(new Source("QEMU stderr (qemu-stderr.txt)",
@@ -118,6 +115,16 @@ final class LiveTerminalDialog {
 
     static void show(Activity a) {
         if (a == null || a.isFinishing() || a.isDestroyed()) {
+            return;
+        }
+        if (CompatConfig.load(a).disableAllLogging) {
+            new AlertDialog.Builder(a)
+                    .setTitle("Live Terminal — Disabled")
+                    .setMessage("All logging is force-disabled in Settings > iOS 26 GPU compatibility (#92).\n\n"
+                            + "No logs (iOS serial, QEMU, App, or KGSL trace) are recorded or loaded while iOS runs.\n\n"
+                            + "Turn OFF \"Force disable ALL logging\" in Settings > iOS 26 GPU compatibility (#92) to re-enable logging and the Live Terminal.")
+                    .setPositiveButton("Close", null)
+                    .show();
             return;
         }
         final List<Source> sources = buildSources(a);
