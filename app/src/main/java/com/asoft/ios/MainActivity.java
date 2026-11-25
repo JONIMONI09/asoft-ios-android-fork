@@ -1298,19 +1298,36 @@ public class MainActivity extends Activity {
                 box.setOrientation(LinearLayout.VERTICAL);
                 box.setPadding(dp(20), dp(12), dp(20), dp(8));
 
+                LinearLayout headerRow = new LinearLayout(this);
+                headerRow.setOrientation(LinearLayout.HORIZONTAL);
+                headerRow.setGravity(Gravity.CENTER_VERTICAL);
                 TextView info = new TextView(this);
                 if (list.isEmpty()) {
                     info.setText("No saved states found for " + name + ".\nUser disk size: " + size(diskBytes) + ".");
                 } else {
                     info.setText("Found " + list.size() + " save" + (list.size() == 1 ? "" : "s")
                             + " for " + name + " (user disk: " + size(diskBytes) + ").\n"
-                            + "Tap any save below to rename it or delete it individually.");
+                            + "Tap any save below to load it, rename it, or delete it individually.");
                 }
                 info.setTextSize(13);
-                info.setPadding(0, 0, 0, dp(12));
-                box.addView(info);
+                headerRow.addView(info, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+                android.widget.Button btnRefresh = new android.widget.Button(this);
+                btnRefresh.setText("↻ Refresh");
+                btnRefresh.setAllCaps(false);
+                btnRefresh.setTextSize(12);
+                headerRow.addView(btnRefresh, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                headerRow.setPadding(0, 0, 0, dp(12));
+                box.addView(headerRow);
 
                 final AlertDialog[] dlg = new AlertDialog[1];
+                btnRefresh.setOnClickListener(v -> {
+                    if (dlg[0] != null) {
+                        dlg[0].dismiss();
+                    }
+                    askManageSaves(os);
+                });
+
                 for (Guest.Snap s : list) {
                     String display = Guest.saveDisplayName(this, os, s.tag, s.label());
                     android.widget.Button row = new android.widget.Button(this);
@@ -1366,15 +1383,32 @@ public class MainActivity extends Activity {
         }, "home-list-saves").start();
     }
 
-    /** Actions for one selected save in the Save Manager: rename or permanently delete (verified). */
+    /** Actions for one selected save in the Save Manager: load, rename or permanently delete (verified). */
     private void askSingleSaveAction(int os, Guest.Snap snap) {
         String display = Guest.saveDisplayName(this, os, snap.tag, snap.label());
+        boolean running = Guest.running() && Guest.os(this) == os;
         new AlertDialog.Builder(this)
                 .setTitle(display)
                 .setMessage("Snapshot tag: " + snap.tag + "\nDate: " + snap.date + "\nSize: " + snap.size
-                        + "\n\nYou can rename this save's display name or permanently delete it from the app's qcow2 disk and metadata.")
-                .setPositiveButton("Rename…", (d, w) -> askRenameSave(os, snap))
-                .setNeutralButton("Delete save", (d, w) -> new AlertDialog.Builder(this)
+                        + "\n\n" + (running ? "Loading it replaces the iOS running now with this save."
+                                : "Loading it starts " + systemName(os) + " directly from this saved state."))
+                .setPositiveButton("Load save", (d, w) -> {
+                    if (Ipa26.busy()) {
+                        Toast.makeText(this, "An .ipa is being installed: wait until it is done.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (Guest.running() && Guest.os(this) != os) {
+                        open(os);
+                        return;
+                    }
+                    whenPowerOk(os, () -> {
+                        Guest.select(this, os);
+                        GuestService.load(this, snap.tag);
+                        startActivity(new Intent(this, ScreenActivity.class));
+                    });
+                })
+                .setNeutralButton("Rename…", (d, w) -> askRenameSave(os, snap))
+                .setNegativeButton("Delete save", (d, w) -> new AlertDialog.Builder(this)
                         .setTitle("Delete \"" + display + "\"?")
                         .setMessage("Permanently remove snapshot \"" + snap.tag + "\" (" + snap.size
                                 + ") and all its metadata files from app storage?")
@@ -1405,7 +1439,6 @@ public class MainActivity extends Activity {
                         }, "home-delete-one-save").start())
                         .setNegativeButton("Cancel", null)
                         .show())
-                .setNegativeButton("Back", (d, w) -> askManageSaves(os))
                 .show();
     }
 
@@ -2230,9 +2263,16 @@ public class MainActivity extends Activity {
             adbWarn.setVisibility(View.GONE);
             return;
         }
-        adbWarn.setText(shizukuRunning
-                ? "Shizuku is running — tap here to grant permission for Free memory for iOS."
-                : "Shizuku / Wireless debugging is disconnected — tap here to reconnect for Free memory for iOS.");
+        int adbState = WirelessAdb.switchedOn(this);
+        if (shizukuRunning) {
+            adbWarn.setText("Shizuku is running — tap here to grant permission for Free memory for iOS.");
+        } else if (adbState == 0) {
+            adbWarn.setText("Wireless debugging is OFF in Developer options — tap here to open settings and turn it on.");
+        } else if (!WirelessAdb.paired(this)) {
+            adbWarn.setText("Wireless debugging is not paired — tap here to pair with pairing code (or use Shizuku).");
+        } else {
+            adbWarn.setText("Wireless debugging is disconnected — tap here to reconnect or pair again.");
+        }
         adbWarn.setVisibility(View.VISIBLE);
     }
 
@@ -2626,6 +2666,23 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {android.Manifest.permission.POST_NOTIFICATIONS}, 7);
+            return;
+        }
+        int adbState = WirelessAdb.switchedOn(this);
+        if (adbState == 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Wireless debugging is not active")
+                    .setMessage("Wireless debugging is currently turned OFF on this device.\n\n"
+                            + "1. Please wait while Developer options opens.\n"
+                            + "2. Scroll to \"Wireless debugging\" and toggle it ON (requires active Wi-Fi).\n"
+                            + "3. Tap \"Pair device with pairing code\" and enter the 6-digit code in the notification.")
+                    .setPositiveButton("Open Developer options", (d, w) -> {
+                        WadbPairService.start(this);
+                        showSettings();
+                        openDeveloperOptions();
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
             return;
         }
         WadbPairService.start(this);
