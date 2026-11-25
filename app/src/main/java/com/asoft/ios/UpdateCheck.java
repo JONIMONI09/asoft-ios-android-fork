@@ -67,6 +67,7 @@ final class UpdateCheck {
 
     private static volatile Notice latest;
     private static long lastAsked;
+    private static volatile boolean checking;
 
     private UpdateCheck() {
     }
@@ -85,7 +86,11 @@ final class UpdateCheck {
     }
 
     static boolean useForkChannel(Context c) {
-        return prefs(c).getBoolean("fork_channel", false);
+        SharedPreferences p = prefs(c);
+        if (p.contains("fork_channel")) {
+            return p.getBoolean("fork_channel", false);
+        }
+        return advancedBuild(version(c)) >= 0;
     }
 
     static void setUseForkChannel(Context c, boolean fork) {
@@ -191,7 +196,7 @@ final class UpdateCheck {
         prefs(c).edit().putString("dismissed", tag).putLong("dismissedAt", System.currentTimeMillis()).commit();
     }
 
-    /** Forces a fresh update check on app startup regardless of the 6-hour throttle. */
+    /** Forces a fresh update check every time the app is opened, regardless of the 6-hour throttle. */
     static void checkOnStart(Activity a, Runnable done) {
         lastAsked = 0;
         check(a, done);
@@ -200,9 +205,10 @@ final class UpdateCheck {
     /** Asks GitHub in the background when it is time to, then runs @done on the screen's thread. */
     static void check(Activity a, Runnable done) {
         long now = SystemClock.elapsedRealtime();
-        if (!enabled(a) || (lastAsked != 0 && now - lastAsked < EVERY_MS)) {
+        if (!enabled(a) || checking || (lastAsked != 0 && now - lastAsked < EVERY_MS)) {
             return;
         }
+        checking = true;
         lastAsked = now;
         Context c = a.getApplicationContext();
         String version = version(a);
@@ -220,6 +226,9 @@ final class UpdateCheck {
             } catch (Exception e) {
                 AppLog.note(c, "update check failed: " + e);
                 ok = false;
+                lastAsked = 0;      // retry on next app open instead of silencing for 6 hours
+            } finally {
+                checking = false;
             }
             // the project's list of tested phones rides on this check: its schedule, its switch (WorksReport.fetchList: once a day)
             WorksReport.fetchList(c, version);

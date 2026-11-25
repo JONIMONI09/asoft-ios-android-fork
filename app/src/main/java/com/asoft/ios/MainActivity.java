@@ -483,6 +483,14 @@ public class MainActivity extends Activity {
         if (saved == null) {
             showCrashOf(getIntent());
         }
+        // Clean any leftover update APK / .part files whenever the app is freshly launched after closing
+        new Thread(() -> ApkUpdater.clearCache(getApplicationContext()), "update-cache-clean").start();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // Check once every time the app is opened (cold launch or returning from background/launcher)
         UpdateCheck.checkOnStart(this, this::showUpdate);
     }
 
@@ -517,7 +525,6 @@ public class MainActivity extends Activity {
         follow.run();
         showUpdate();
         showGameSpaceBanner();
-        UpdateCheck.check(this, this::showUpdate);
         if (pendingInstallApk != null && pendingInstallApk.isFile() && getPackageManager().canRequestPackageInstalls()) {
             File apk = pendingInstallApk;
             pendingInstallApk = null;
