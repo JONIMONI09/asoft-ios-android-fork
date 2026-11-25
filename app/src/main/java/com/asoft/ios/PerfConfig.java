@@ -22,6 +22,8 @@ final class PerfConfig {
     static volatile int liveFrameCapFps = 0;
     /** Live-updated toggle to log tap & swipe response latency and swipe FPS into app.txt. */
     static volatile boolean liveLogInteractionTiming = false;
+    /** Live-updated master toggle to disable all extra logging (app.txt, qemu.log, kgsl-trace, timing) keeping only iOS serial. */
+    static volatile boolean liveDisableExtraLogs = false;
 
     /** 0 = Auto (4 vCPUs); else 2, 4, 6, or 8. Takes effect on next cold boot. */
     int vcpus;
@@ -136,7 +138,8 @@ final class PerfConfig {
 
     static void applyLive(PerfConfig p) {
         liveFrameCapFps = sanitizeFrameCap(p.frameCapFps);
-        liveLogInteractionTiming = p.logInteractionTiming;
+        liveDisableExtraLogs = p.disableQemuLog;
+        liveLogInteractionTiming = !p.disableQemuLog && p.logInteractionTiming;
         switch (sanitizeTouchPacing(p.touchPacing)) {
             case TOUCH_RESPONSIVE:
                 liveTouchMinGapMs = 8;
@@ -194,7 +197,8 @@ final class PerfConfig {
     boolean changedLiveComparedTo(PerfConfig other) {
         return this.frameCapFps != other.frameCapFps
                 || this.touchPacing != other.touchPacing
-                || this.logInteractionTiming != other.logInteractionTiming;
+                || this.logInteractionTiming != other.logInteractionTiming
+                || this.disableQemuLog != other.disableQemuLog;
     }
 
     String summaryLine() {

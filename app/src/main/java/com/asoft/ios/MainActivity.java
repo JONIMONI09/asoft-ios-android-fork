@@ -1091,10 +1091,10 @@ public class MainActivity extends Activity {
                 "How long after cold boot before native ARM64 user-space execution engages (ASOFT_NATIVE_EL0_DELAY_MS). Shorter values speed up late boot.",
                 delayLabels, indexOf(delayVals, cur.el0DelayMs));
 
-        // 8. Disable QEMU guest_errors log [Next start]
+        // 8. Disable all extra logging (keep iOS serial only) [Live / Next start]
         android.widget.CheckBox cbDisableQemuLog = addPerfCheck(box,
-                "Disable QEMU guest_errors log (-d off) [Next start]",
-                "Stops QEMU from writing unimplemented register accesses to qemu.log, reducing flash I/O and lock overhead while iOS runs.",
+                "Disable all extra logging (keep iOS serial only) [Live / Next start]",
+                "Disables QEMU guest_errors (qemu.log), App log (app.txt), KGSL/Vulkan traces, verbose engine logs, and tap/swipe timing logs to remove background flash I/O. Only iOS serial (serial.txt) stays active for the floating Terminal.",
                 cur.disableQemuLog);
 
         // 9. Host Display Frame Cap [Live]
@@ -1124,8 +1124,17 @@ public class MainActivity extends Activity {
         // 11. Log Tap & Swipe Timing [Live]
         android.widget.CheckBox cbLogTiming = addPerfCheck(box,
                 "Log tap & swipe response times [Live]",
-                "Records tap-to-frame latency (ms) and swipe FPS into app.txt so you can measure improvements live in the floating Terminal (App log).",
-                cur.logInteractionTiming);
+                "Records tap-to-frame latency (ms) and swipe FPS into app.txt (only available when extra logging is enabled).",
+                !cur.disableQemuLog && cur.logInteractionTiming);
+        cbLogTiming.setEnabled(!cur.disableQemuLog);
+        cbDisableQemuLog.setOnCheckedChangeListener((btn, isChecked) -> {
+            if (isChecked) {
+                cbLogTiming.setChecked(false);
+                cbLogTiming.setEnabled(false);
+            } else {
+                cbLogTiming.setEnabled(true);
+            }
+        });
 
         Runnable syncUi = () -> {
             spVcpus.setSelection(indexOf(vcpuVals, cur.vcpus));
@@ -1138,7 +1147,8 @@ public class MainActivity extends Activity {
             cbDisableQemuLog.setChecked(cur.disableQemuLog);
             spFps.setSelection(indexOf(fpsVals, cur.frameCapFps));
             spTouch.setSelection(indexOf(touchVals, cur.touchPacing));
-            cbLogTiming.setChecked(cur.logInteractionTiming);
+            cbLogTiming.setChecked(!cur.disableQemuLog && cur.logInteractionTiming);
+            cbLogTiming.setEnabled(!cur.disableQemuLog);
         };
         btnBalanced.setOnClickListener(v -> {
             PerfConfig p = PerfConfig.balancedFast();
@@ -1173,8 +1183,13 @@ public class MainActivity extends Activity {
                     next.disableQemuLog = cbDisableQemuLog.isChecked();
                     next.frameCapFps = fpsVals[spFps.getSelectedItemPosition()];
                     next.touchPacing = touchVals[spTouch.getSelectedItemPosition()];
-                    next.logInteractionTiming = cbLogTiming.isChecked();
+                    next.logInteractionTiming = !next.disableQemuLog && cbLogTiming.isChecked();
                     PerfConfig.save(this, next);
+                    if (next.disableQemuLog) {
+                        File runDir = Guest.runDir(this);
+                        new File(runDir, "qemu.log").delete();
+                        new File(runDir, CompatConfig.TRACE_FILE).delete();
+                    }
                     notePerfChange(os, before, next);
                 })
                 .setNegativeButton("Cancel", null)
