@@ -1079,7 +1079,25 @@ public class MainActivity extends Activity {
                 "Number of native ARM64 user-space execution stubs kept warm. More stubs reduce eviction stalls when switching between SpringBoard and apps.",
                 stubLabels, indexOf(stubVals, cur.el0Stubs));
 
-        // 7. Host Display Frame Cap [Live]
+        // 7. Native-EL0 Startup Delay [Next start]
+        final int[] delayVals = {20000, 10000, 5000};
+        final String[] delayLabels = {
+                "20 s (default — safest early boot)",
+                "10 s (faster early boot)",
+                "5 s (aggressive — test carefully)"
+        };
+        android.widget.Spinner spDelay = addPerfSpinner(box,
+                "Native-EL0 Startup Delay (iOS 26) [Next start]",
+                "How long after cold boot before native ARM64 user-space execution engages (ASOFT_NATIVE_EL0_DELAY_MS). Shorter values speed up late boot.",
+                delayLabels, indexOf(delayVals, cur.el0DelayMs));
+
+        // 8. Disable QEMU guest_errors log [Next start]
+        android.widget.CheckBox cbDisableQemuLog = addPerfCheck(box,
+                "Disable QEMU guest_errors log (-d off) [Next start]",
+                "Stops QEMU from writing unimplemented register accesses to qemu.log, reducing flash I/O and lock overhead while iOS runs.",
+                cur.disableQemuLog);
+
+        // 9. Host Display Frame Cap [Live]
         final int[] fpsVals = {0, 60, 30};
         final String[] fpsLabels = {
                 "Auto (native display Hz — default)",
@@ -1091,7 +1109,7 @@ public class MainActivity extends Activity {
                 "Limits how often Android polls and uploads the guest framebuffer. Capping at 60 FPS on 120–144 Hz gaming displays saves host CPU and reduces heat.",
                 fpsLabels, indexOf(fpsVals, cur.frameCapFps));
 
-        // 8. Touch Swipe Pacing [Live]
+        // 10. Touch Swipe Pacing [Live]
         final int[] touchVals = {PerfConfig.TOUCH_BALANCED, PerfConfig.TOUCH_RESPONSIVE, PerfConfig.TOUCH_LOW_OVERHEAD};
         final String[] touchLabels = {
                 "Balanced (16 / 66 ms — default)",
@@ -1103,6 +1121,12 @@ public class MainActivity extends Activity {
                 "Controls how quickly finger-move events are sent over QMP during swipes. Responsive reduces swipe delay; Low-overhead helps if swipes freeze under heavy CPU load.",
                 touchLabels, indexOf(touchVals, cur.touchPacing));
 
+        // 11. Log Tap & Swipe Timing [Live]
+        android.widget.CheckBox cbLogTiming = addPerfCheck(box,
+                "Log tap & swipe response times [Live]",
+                "Records tap-to-frame latency (ms) and swipe FPS into app.txt so you can measure improvements live in the floating Terminal (App log).",
+                cur.logInteractionTiming);
+
         Runnable syncUi = () -> {
             spVcpus.setSelection(indexOf(vcpuVals, cur.vcpus));
             cbPinFast.setChecked(cur.pinFastCores);
@@ -1110,8 +1134,11 @@ public class MainActivity extends Activity {
             cbIoThread.setChecked(cur.diskIoThread);
             cbWriteback.setChecked(cur.diskWriteback);
             spStubs.setSelection(indexOf(stubVals, cur.el0Stubs));
+            spDelay.setSelection(indexOf(delayVals, cur.el0DelayMs));
+            cbDisableQemuLog.setChecked(cur.disableQemuLog);
             spFps.setSelection(indexOf(fpsVals, cur.frameCapFps));
             spTouch.setSelection(indexOf(touchVals, cur.touchPacing));
+            cbLogTiming.setChecked(cur.logInteractionTiming);
         };
         btnBalanced.setOnClickListener(v -> {
             PerfConfig p = PerfConfig.balancedFast();
@@ -1142,8 +1169,11 @@ public class MainActivity extends Activity {
                     next.diskIoThread = cbIoThread.isChecked();
                     next.diskWriteback = cbWriteback.isChecked();
                     next.el0Stubs = stubVals[spStubs.getSelectedItemPosition()];
+                    next.el0DelayMs = delayVals[spDelay.getSelectedItemPosition()];
+                    next.disableQemuLog = cbDisableQemuLog.isChecked();
                     next.frameCapFps = fpsVals[spFps.getSelectedItemPosition()];
                     next.touchPacing = touchVals[spTouch.getSelectedItemPosition()];
+                    next.logInteractionTiming = cbLogTiming.isChecked();
                     PerfConfig.save(this, next);
                     notePerfChange(os, before, next);
                 })
@@ -1158,8 +1188,11 @@ public class MainActivity extends Activity {
         dst.diskIoThread = src.diskIoThread;
         dst.diskWriteback = src.diskWriteback;
         dst.el0Stubs = src.el0Stubs;
+        dst.el0DelayMs = src.el0DelayMs;
+        dst.disableQemuLog = src.disableQemuLog;
         dst.frameCapFps = src.frameCapFps;
         dst.touchPacing = src.touchPacing;
+        dst.logInteractionTiming = src.logInteractionTiming;
     }
 
     private static int indexOf(int[] arr, int val) {

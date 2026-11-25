@@ -149,6 +149,9 @@
    - Upgraded `MainActivity.askManageSaves()` into an interactive per-save manager: tap any save to rename its persistent display name (`Guest.setSaveDisplayName`) or delete that exact snapshot from qcow2 + metadata with post-delete verification (`Guest.snapshots`), alongside Delete all saves and Boot without save.
    - Added a **`>_` Terminal** icon (`ic_bar_terminal.xml`) to `ScreenActivity`'s floating sidebar opening `LiveTerminalDialog` (`iOS Serial` / `QEMU stderr` / `App log`, keyword + date/time search with `Today` shortcut, and `Live follow` ON/OFF toggle) to diagnose black-screen boots directly over iOS.
    - Switched remaining `SharedPreferences` writes in `Guest.java` (`select`, `setScale26`, `setRamMiB`) to synchronous `.commit()` so 100% of app settings survive force-closes and reboots.
+10. **QEMU Log Offload, Native-EL0 Startup Delay & Live Interaction Latency Logger (`PerfConfig.java`, `Guest.java`, `ScreenActivity.java`, `MainActivity.java`, `PerfConfigTest.java`):**
+    - Added **`Disable QEMU guest_errors log (-d off)`** `[Next start]` (omits `-d guest_errors,unimp -D qemu.log`), **`Native-EL0 Startup Delay`** (`20 s / 10 s / 5 s`, `ASOFT_NATIVE_EL0_DELAY_MS`) `[Next start]`, and **`Log tap & swipe response times`** `[Live]` to `Advanced performance…`.
+    - When interaction timing logging is enabled, `ScreenActivity` logs tap-to-first-frame latency (`ms`) and swipe duration / frame count / effective FPS to `app.txt` (viewable live in the floating Terminal under `App log`).
 
 
 

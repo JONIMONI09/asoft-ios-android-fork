@@ -20,6 +20,8 @@ final class PerfConfig {
     static volatile long liveTouchMaxGapMs = 66;
     /** Live-updated host render frame cap (0 = native display Hz, else 60 or 30). */
     static volatile int liveFrameCapFps = 0;
+    /** Live-updated toggle to log tap & swipe response latency and swipe FPS into app.txt. */
+    static volatile boolean liveLogInteractionTiming = false;
 
     /** 0 = Auto (4 vCPUs); else 2, 4, 6, or 8. Takes effect on next cold boot. */
     int vcpus;
@@ -33,10 +35,16 @@ final class PerfConfig {
     boolean diskWriteback;
     /** Native-EL0 stub pool size for iOS 26 (24, 32, 48). Next start. */
     int el0Stubs;
+    /** Native-EL0 startup delay in ms (20000 default, 10000 faster, 5000 aggressive). Next start. */
+    int el0DelayMs;
+    /** Omit QEMU -d guest_errors,unimp -D qemu.log to avoid flash I/O on unimplemented registers. Next start. */
+    boolean disableQemuLog;
     /** Host display frame poll cap in ScreenActivity: 0 = Auto (native Hz), 60, or 30. Live. */
     int frameCapFps;
     /** Touch move pacing in Qmp.fingerLoop: TOUCH_BALANCED, TOUCH_RESPONSIVE, TOUCH_LOW_OVERHEAD. Live. */
     int touchPacing;
+    /** Log tap & swipe response latencies and swipe FPS to app.txt (visible in Live Terminal). Live. */
+    boolean logInteractionTiming;
 
     PerfConfig() {
         this.vcpus = 0;
@@ -45,8 +53,11 @@ final class PerfConfig {
         this.diskIoThread = false;
         this.diskWriteback = false;
         this.el0Stubs = 24;
+        this.el0DelayMs = 20000;
+        this.disableQemuLog = false;
         this.frameCapFps = 0;
         this.touchPacing = TOUCH_BALANCED;
+        this.logInteractionTiming = false;
     }
 
     static PerfConfig stockDefaults() {
@@ -62,8 +73,11 @@ final class PerfConfig {
         p.diskIoThread = true;
         p.diskWriteback = false;
         p.el0Stubs = 32;
+        p.el0DelayMs = 10000;
+        p.disableQemuLog = true;
         p.frameCapFps = 60;
         p.touchPacing = TOUCH_RESPONSIVE;
+        p.logInteractionTiming = false;
         return p;
     }
 
@@ -76,8 +90,11 @@ final class PerfConfig {
         p.diskIoThread = true;
         p.diskWriteback = true;
         p.el0Stubs = 48;
+        p.el0DelayMs = 10000;
+        p.disableQemuLog = true;
         p.frameCapFps = 60;
         p.touchPacing = TOUCH_RESPONSIVE;
+        p.logInteractionTiming = false;
         return p;
     }
 
@@ -90,8 +107,11 @@ final class PerfConfig {
         p.diskIoThread = sp.getBoolean("diskIoThread", false);
         p.diskWriteback = sp.getBoolean("diskWriteback", false);
         p.el0Stubs = sanitizeEl0Stubs(sp.getInt("el0Stubs", 24));
+        p.el0DelayMs = sanitizeEl0DelayMs(sp.getInt("el0DelayMs", 20000));
+        p.disableQemuLog = sp.getBoolean("disableQemuLog", false);
         p.frameCapFps = sanitizeFrameCap(sp.getInt("frameCapFps", 0));
         p.touchPacing = sanitizeTouchPacing(sp.getInt("touchPacing", TOUCH_BALANCED));
+        p.logInteractionTiming = sp.getBoolean("logInteractionTiming", false);
         applyLive(p);
         return p;
     }
@@ -105,14 +125,18 @@ final class PerfConfig {
                 .putBoolean("diskIoThread", p.diskIoThread)
                 .putBoolean("diskWriteback", p.diskWriteback)
                 .putInt("el0Stubs", sanitizeEl0Stubs(p.el0Stubs))
+                .putInt("el0DelayMs", sanitizeEl0DelayMs(p.el0DelayMs))
+                .putBoolean("disableQemuLog", p.disableQemuLog)
                 .putInt("frameCapFps", sanitizeFrameCap(p.frameCapFps))
                 .putInt("touchPacing", sanitizeTouchPacing(p.touchPacing))
+                .putBoolean("logInteractionTiming", p.logInteractionTiming)
                 .commit();
         applyLive(p);
     }
 
     static void applyLive(PerfConfig p) {
         liveFrameCapFps = sanitizeFrameCap(p.frameCapFps);
+        liveLogInteractionTiming = p.logInteractionTiming;
         switch (sanitizeTouchPacing(p.touchPacing)) {
             case TOUCH_RESPONSIVE:
                 liveTouchMinGapMs = 8;
@@ -141,6 +165,10 @@ final class PerfConfig {
         return (v == 24 || v == 32 || v == 48) ? v : 24;
     }
 
+    static int sanitizeEl0DelayMs(int v) {
+        return (v == 5000 || v == 10000 || v == 20000) ? v : 20000;
+    }
+
     static int sanitizeFrameCap(int v) {
         return (v == 30 || v == 60) ? v : 0;
     }
@@ -158,12 +186,15 @@ final class PerfConfig {
                 || this.tbSizeMiB != other.tbSizeMiB
                 || this.diskIoThread != other.diskIoThread
                 || this.diskWriteback != other.diskWriteback
-                || this.el0Stubs != other.el0Stubs;
+                || this.el0Stubs != other.el0Stubs
+                || this.el0DelayMs != other.el0DelayMs
+                || this.disableQemuLog != other.disableQemuLog;
     }
 
     boolean changedLiveComparedTo(PerfConfig other) {
         return this.frameCapFps != other.frameCapFps
-                || this.touchPacing != other.touchPacing;
+                || this.touchPacing != other.touchPacing
+                || this.logInteractionTiming != other.logInteractionTiming;
     }
 
     String summaryLine() {
@@ -173,8 +204,11 @@ final class PerfConfig {
                 + ", diskIoThread=" + (diskIoThread ? "on" : "off")
                 + ", diskCache=" + (diskWriteback ? "writeback" : "none")
                 + ", el0Stubs=" + el0Stubs
+                + ", el0Delay=" + el0DelayMs + "ms"
+                + ", qemuLog=" + (disableQemuLog ? "off" : "on")
                 + ", frameCap=" + (frameCapFps == 0 ? "auto" : frameCapFps + "fps")
                 + ", touch=" + (touchPacing == TOUCH_RESPONSIVE ? "responsive"
-                : touchPacing == TOUCH_LOW_OVERHEAD ? "low-overhead" : "balanced");
+                : touchPacing == TOUCH_LOW_OVERHEAD ? "low-overhead" : "balanced")
+                + ", inputTiming=" + (logInteractionTiming ? "on" : "off");
     }
 }

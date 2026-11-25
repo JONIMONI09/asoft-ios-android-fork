@@ -16,8 +16,11 @@ public class PerfConfigTest {
         assertFalse(p.diskIoThread);
         assertFalse(p.diskWriteback);
         assertEquals(24, p.el0Stubs);
+        assertEquals(20000, p.el0DelayMs);
+        assertFalse(p.disableQemuLog);
         assertEquals(0, p.frameCapFps);
         assertEquals(PerfConfig.TOUCH_BALANCED, p.touchPacing);
+        assertFalse(p.logInteractionTiming);
     }
 
     @Test
@@ -28,6 +31,8 @@ public class PerfConfigTest {
         assertTrue(balanced.diskIoThread);
         assertFalse(balanced.diskWriteback);
         assertEquals(32, balanced.el0Stubs);
+        assertEquals(10000, balanced.el0DelayMs);
+        assertTrue(balanced.disableQemuLog);
         assertEquals(60, balanced.frameCapFps);
         assertEquals(PerfConfig.TOUCH_RESPONSIVE, balanced.touchPacing);
 
@@ -35,12 +40,16 @@ public class PerfConfigTest {
         assertTrue(gaming.diskWriteback);
         assertEquals(1536, gaming.tbSizeMiB);
         assertEquals(48, gaming.el0Stubs);
+        assertEquals(10000, gaming.el0DelayMs);
+        assertTrue(gaming.disableQemuLog);
 
         assertEquals(0, PerfConfig.sanitizeVcpus(99));
         assertEquals(6, PerfConfig.sanitizeVcpus(6));
         assertEquals(768, PerfConfig.sanitizeTbSize(123));
         assertEquals(1536, PerfConfig.sanitizeTbSize(1536));
         assertEquals(24, PerfConfig.sanitizeEl0Stubs(10));
+        assertEquals(20000, PerfConfig.sanitizeEl0DelayMs(100));
+        assertEquals(5000, PerfConfig.sanitizeEl0DelayMs(5000));
         assertEquals(0, PerfConfig.sanitizeFrameCap(144));
         assertEquals(30, PerfConfig.sanitizeFrameCap(30));
     }
@@ -51,6 +60,7 @@ public class PerfConfigTest {
         PerfConfig b = PerfConfig.stockDefaults();
         b.frameCapFps = 60;
         b.touchPacing = PerfConfig.TOUCH_RESPONSIVE;
+        b.logInteractionTiming = true;
         assertTrue(b.changedLiveComparedTo(a));
         assertFalse(b.needsRestartComparedTo(a));
         assertFalse(b.needsColdBootComparedTo(a));
@@ -59,8 +69,9 @@ public class PerfConfigTest {
         assertEquals(60, PerfConfig.liveFrameCapFps);
         assertEquals(8, PerfConfig.liveTouchMinGapMs);
         assertEquals(33, PerfConfig.liveTouchMaxGapMs);
+        assertTrue(PerfConfig.liveLogInteractionTiming);
 
-        b.pinFastCores = true;
+        b.disableQemuLog = true;
         assertTrue(b.needsRestartComparedTo(a));
         assertFalse(b.needsColdBootComparedTo(a));
 
@@ -68,5 +79,6 @@ public class PerfConfigTest {
         assertTrue(b.needsColdBootComparedTo(a));
 
         PerfConfig.applyLive(PerfConfig.stockDefaults());
+        assertFalse(PerfConfig.liveLogInteractionTiming);
     }
 }
