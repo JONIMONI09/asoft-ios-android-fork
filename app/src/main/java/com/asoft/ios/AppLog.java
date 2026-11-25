@@ -49,6 +49,9 @@ final class AppLog {
     }
 
     private static void note0(Context c, String s) {
+        if (PerfConfig.liveDisableExtraLogs) {
+            return;
+        }
         String line = new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date()) + " " + s;
         boolean sync = false;
         try {
@@ -67,7 +70,10 @@ final class AppLog {
 
     /** QEMU's and the guest's last lines, before a new start overwrites them. */
     static void keepRunLogs(Context c) {
-        for (String n : new String[] {"qemu-stderr.txt", "serial.txt", CompatConfig.TRACE_FILE, BootDiagnostics.FILE_NAME}) {
+        String[] names = PerfConfig.liveDisableExtraLogs
+                ? new String[] {"serial.txt"}
+                : new String[] {"qemu-stderr.txt", "serial.txt", CompatConfig.TRACE_FILE, BootDiagnostics.FILE_NAME};
+        for (String n : names) {
             File from = new File(Guest.runDir(c), n);
             if (!from.isFile()) {
                 continue;

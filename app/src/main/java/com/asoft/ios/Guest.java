@@ -2088,7 +2088,6 @@ final class Guest {
                 "-device", "ramfb", "-device", "virtio-keyboard-device", "-device", "virtio-tablet-device",
                 "-qmp", "unix:" + qmpPath(c) + ",server,nowait",
                 "-serial", "file:" + new File(run, "serial.txt").getPath(),
-                "-d", "guest_errors,unimp", "-D", new File(run, "qemu.log").getPath(),
                 "-no-reboot", "-nic", "none",
                 "-device", "loader,file=" + new File(g, "ram.bin").getPath() + ",addr=0x" + Long.toHexString(KERNEL_PA) + ",force-raw=on",
                 "-device", "loader,file=" + new File(g, "stub.bin").getPath() + ",addr=0x" + Long.toHexString(STUB_PA) + ",force-raw=on",
@@ -2100,6 +2099,14 @@ final class Guest {
                 // cache that filled the phone's memory and lmkd killed the app (QEMU with it) mid-save
                 "-drive", "file=" + userDisk(c).getPath() + ",if=none,id=root,cache=none,format=qcow2",
                 "-device", "virtio-blk-device,drive=root"));
+        if (!PerfConfig.load(c).disableQemuLog) {
+            cmd.add("-d");
+            cmd.add("guest_errors,unimp");
+            cmd.add("-D");
+            cmd.add(new File(run, "qemu.log").getPath());
+        } else {
+            new File(run, "qemu.log").delete();
+        }
         if (resumed) {
             cmd.add("-loadvm");
             cmd.add(loadTag);
@@ -2446,6 +2453,9 @@ final class Guest {
             cmd.add("guest_errors,unimp");
             cmd.add("-D");
             cmd.add(new File(run, "qemu.log").getPath());
+        } else {
+            new File(run, "qemu.log").delete();
+            new File(run, CompatConfig.TRACE_FILE).delete();
         }
         // iOS 26 without a USB keyboard, so that iOS shows its own (kbd26); a save made with one loads with it
         boolean kbd = watch || sb != null || resumed && !savedNoKbdFile(c, loadTag).isFile();
@@ -2549,7 +2559,12 @@ final class Guest {
         env.putAll(ImportMode.envAdditions(compat26 && sys, importMarkerAtStart, ov));
         boolean ios26Compat = !watch && compat26;
         CompatConfig.setCompatRunActive(ios26Compat);
-        CompatConfig.Config compatCfg = CompatConfig.load(c);
+        CompatConfig.Config compatCfg = CompatConfig.load(c).copy();
+        if (perfCfg.disableQemuLog) {
+            compatCfg.kgslTrace = false;
+            compatCfg.syncLogging = false;
+            compatCfg.verboseEngineLogs = false;
+        }
         boolean icdShimmed = CompatConfig.shouldUseIcdShim(ios26Compat, sys, compatCfg);
         if (icdShimmed && !ov.containsKey("env.VK_DRIVER_FILES")) {
             File shimIcd = writeShimmedVulkanIcd(c);

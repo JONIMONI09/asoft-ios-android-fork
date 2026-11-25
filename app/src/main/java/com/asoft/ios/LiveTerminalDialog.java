@@ -75,15 +75,15 @@ final class LiveTerminalDialog {
         List<Source> list = new ArrayList<>();
         list.add(new Source("iOS Serial (serial.txt)",
                 new File(run, "serial.txt"), new File(logDir, "last-serial.txt"), null));
+        if (perf.disableQemuLog) {
+            return list;
+        }
         list.add(new Source("App log (app.txt)",
                 new File(run, "app.txt"), new File(logDir, "app.txt"), null));
         list.add(new Source("QEMU stderr (qemu-stderr.txt)",
                 new File(run, "qemu-stderr.txt"), new File(logDir, "last-qemu-stderr.txt"), null));
         list.add(new Source("QEMU guest errors (qemu.log)",
-                new File(run, "qemu.log"), null,
-                perf.disableQemuLog
-                        ? "[Disabled by setting]\nQEMU guest_errors log (-d off) is turned OFF in Advanced performance… for better speed.\nRe-enable it there if you want qemu.log recorded."
-                        : null));
+                new File(run, "qemu.log"), null, null));
         list.add(new Source("QEMU command line (cmdline.txt)",
                 new File(run, "cmdline.txt"), null, null));
         list.add(new Source("KGSL & Vulkan shim trace (kgsl-trace.txt)",
@@ -225,6 +225,17 @@ final class LiveTerminalDialog {
                 if (closed[0] || myGen != gen[0]) {
                     return;
                 }
+                if (src.disabledNotice != null) {
+                    String meta = src.label + " · DISABLED";
+                    a.runOnUiThread(() -> {
+                        if (closed[0] || a.isFinishing() || a.isDestroyed() || myGen != gen[0]) {
+                            return;
+                        }
+                        tvMeta.setText(meta);
+                        tvLog.setText(src.disabledNotice);
+                    });
+                    return;
+                }
                 File f = src.resolve();
                 long len = (f != null && f.isFile()) ? f.length() : 0L;
                 long mod = (f != null && f.isFile()) ? f.lastModified() : 0L;
@@ -234,24 +245,18 @@ final class LiveTerminalDialog {
                     lastRaw[0] = len > 0 ? readTail(f, MAX_TAIL_BYTES) : "";
                 }
                 String raw = lastRaw[0];
-                String displayText;
                 int totalLines = countLines(raw);
-                int shownLines;
-                if (raw.isEmpty() && src.disabledNotice != null) {
-                    displayText = src.disabledNotice;
-                    shownLines = 0;
-                } else {
-                    String filtered = filterLines(raw, q, dt);
-                    shownLines = countLines(filtered);
-                    displayText = filtered.isEmpty()
-                            ? (raw.isEmpty() ? "(log file is empty or not created yet)" : "(no lines match the current filter)")
-                            : filtered;
-                }
+                String filtered = filterLines(raw, q, dt);
+                int shownLines = countLines(filtered);
+                String displayText = filtered.isEmpty()
+                        ? (raw.isEmpty() ? "(log file is empty or not created yet)" : "(no lines match the current filter)")
+                        : filtered;
                 String fname = f != null ? f.getName() : "none";
+                String modeNote = sources.size() == 1 ? " · iOS only" : "";
                 String meta = String.format(Locale.ROOT,
-                        "%s (%.1f KB) · showing %d / %d lines%s",
+                        "%s (%.1f KB) · showing %d / %d lines%s%s",
                         fname, len / 1024.0, shownLines, totalLines,
-                        live ? " · LIVE" : " · PAUSED");
+                        live ? " · LIVE" : " · PAUSED", modeNote);
                 a.runOnUiThread(() -> {
                     if (closed[0] || a.isFinishing() || a.isDestroyed() || myGen != gen[0]) {
                         return;
