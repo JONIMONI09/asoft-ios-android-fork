@@ -730,6 +730,8 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             try {
                 ApkUpdater.ReleaseAsset asset = ApkUpdater.fetchLatest(this, fork);
+                String installed = UpdateCheck.version(this);
+                boolean isNewer = UpdateCheck.newer(asset.tag, installed);
                 long freeBytes = getFilesDir().getUsableSpace();
                 String dlMb = asset.sizeBytes > 0 ? String.format(java.util.Locale.US, "%.1f MB", asset.sizeBytes / (1024.0 * 1024.0)) : "unknown size";
                 String freeStr = freeBytes >= (1L << 30)
@@ -740,13 +742,36 @@ public class MainActivity extends Activity {
                     if (isFinishing() || isDestroyed()) {
                         return;
                     }
+                    if (!isNewer) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("App is up to date")
+                                .setMessage("Installed version: " + installed
+                                        + "\nLatest release: " + asset.tag
+                                        + "\nDownload size: " + dlMb
+                                        + "\nFree device storage: " + freeStr
+                                        + "\n\nYou already have the latest version installed. You can clear the update cache and force a fresh reinstall if needed.")
+                                .setPositiveButton("OK", null)
+                                .setNeutralButton("Force reinstall", (d, w) -> {
+                                    pendingInstallApk = null;
+                                    ApkUpdater.clearCache(this);
+                                    beginVerifiedApkDownload(asset);
+                                })
+                                .show();
+                        return;
+                    }
                     new AlertDialog.Builder(this)
                             .setTitle("Download " + asset.tag + "?")
-                            .setMessage("APK file: " + asset.assetName
+                            .setMessage("Installed version: " + installed
+                                    + "\nLatest release: " + asset.tag
+                                    + "\nAPK file: " + asset.assetName
                                     + "\nDownload size: " + dlMb
                                     + "\nFree device storage: " + freeStr
                                     + "\n\nThe APK will be verified (ZIP structure, package name, signing key, and SHA-256) before installing.")
-                            .setPositiveButton("Download", (d, w) -> beginVerifiedApkDownload(asset))
+                            .setPositiveButton("Download", (d, w) -> {
+                                pendingInstallApk = null;
+                                ApkUpdater.clearCache(this);
+                                beginVerifiedApkDownload(asset);
+                            })
                             .setNegativeButton("Cancel", null)
                             .show();
                 });

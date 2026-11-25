@@ -221,6 +221,12 @@ final class ApkUpdater {
         return asset;
     }
 
+    static void clearCache(Context c) {
+        File dir = ShareProvider.dir(c);
+        new File(dir, APK_FILE_NAME).delete();
+        new File(dir, APK_FILE_NAME + ".part").delete();
+    }
+
     static VerifyResult downloadAndVerify(Context c, ReleaseAsset asset, ProgressCb cb) throws Exception {
         File dir = ShareProvider.dir(c);
         dir.mkdirs();
