@@ -930,6 +930,7 @@ public class MainActivity extends Activity {
         if (!up) {
             m.getMenu().add(0, 1, 0, "Boot, not from the save");
         }
+        m.getMenu().add(0, 8, 0, "Manage / delete all saves…");
         if (os == Guest.IOS26) {
             m.getMenu().add(0, 2, 0, "Screen: " + (Guest.scale26(this) == 2 ? "2x (faster)" : "3x (sharp)"));
         }
@@ -941,7 +942,9 @@ public class MainActivity extends Activity {
         if (os == Guest.IOS26) {
             m.getMenu().add(0, 7, 0, "Install an .ipa…");
         }
-        m.getMenu().add(0, 4, 0, os == Guest.WATCH ? "Erase the watch…" : "Erase the iPhone…");
+        m.getMenu().add(0, 4, 0, os == Guest.WATCH
+                ? "Factory reset watch (keep watchOS)…"
+                : "Factory reset iPhone (keep " + systemName(os) + ")…");
         m.getMenu().add(0, 5, 0, "Remove from this phone…");
         m.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -951,11 +954,73 @@ public class MainActivity extends Activity {
                 case 4: askErase(os); break;
                 case 6: CrashReport.show(this, crash); break;
                 case 7: installIpa(); break;
+                case 8: askManageSaves(os); break;
                 default: askRemove(os);
             }
             return true;
         });
         m.show();
+    }
+
+    /** Scans all saved states for @os off the UI thread and lets the user delete all saves or boot without save. */
+    private void askManageSaves(int os) {
+        if (Guest.saving()) {
+            Toast.makeText(this, "A save is currently in progress: wait until it finishes.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String name = systemName(os);
+        new Thread(() -> {
+            java.util.List<Guest.Snap> list = Guest.snapshots(this, os);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                StringBuilder msg = new StringBuilder();
+                if (list.isEmpty()) {
+                    msg.append("No saved states found for ").append(name).append(".");
+                } else {
+                    msg.append("Found ").append(list.size()).append(" saved state")
+                            .append(list.size() == 1 ? "" : "s").append(" for ").append(name).append(":\n\n");
+                    for (Guest.Snap s : list) {
+                        msg.append("• ").append(s.label()).append(" (").append(s.tag)
+                                .append(")\n   ").append(s.date).append(" · ").append(s.size).append("\n");
+                    }
+                    msg.append("\nDeleting all saves frees snapshot space and prevents broken quick-saves from auto-loading. ")
+                            .append(name).append(" itself and your user disk stay intact.");
+                }
+                AlertDialog.Builder b = new AlertDialog.Builder(this)
+                        .setTitle("Saves — " + name)
+                        .setMessage(msg.toString())
+                        .setNegativeButton("Close", null);
+                if (!list.isEmpty()) {
+                    b.setPositiveButton("Delete all saves (" + list.size() + ")", (d, w) ->
+                            new AlertDialog.Builder(this)
+                                    .setTitle("Delete all " + list.size() + " save(s)?")
+                                    .setMessage("All saved states for " + name + " will be permanently deleted. "
+                                            + name + " itself stays installed.")
+                                    .setPositiveButton("Delete all", (d2, w2) -> new Thread(() -> {
+                                        Guest.DeleteAllResult res = Guest.deleteAllSnapshots(this, os);
+                                        runOnUiThread(() -> {
+                                            if (isFinishing() || isDestroyed()) {
+                                                return;
+                                            }
+                                            Toast.makeText(this, res.error != null
+                                                    ? "Deleted " + res.deleted + " of " + res.found + " saves (error: " + res.error + ")"
+                                                    : "Deleted all " + res.deleted + " save(s)",
+                                                    Toast.LENGTH_LONG).show();
+                                            shown = "";
+                                            refresh();
+                                        });
+                                    }, "home-delete-all-saves").start())
+                                    .setNegativeButton("Cancel", null)
+                                    .show());
+                }
+                if (!Guest.running()) {
+                    b.setNeutralButton("Boot without save", (d, w) -> bootCold(os));
+                }
+                b.show();
+            });
+        }, "home-list-saves").start();
     }
 
     private void bootCold(int os) {
@@ -980,10 +1045,10 @@ public class MainActivity extends Activity {
         boolean watch = os == Guest.WATCH;
         String what = watch ? "watchOS's watch" : os == Guest.IOS26 ? "iOS 26's iPhone" : "iOS 16's iPhone";
         new AlertDialog.Builder(this)
-                .setTitle("Erase " + what + "?")
-                .setMessage(watch ? "The watch's settings, faces and saves go; it starts as it came. watchOS itself stays."
-                        : "Its settings, installed apps and saves go; iOS starts as new. " + systemName(os) + " itself stays.")
-                .setPositiveButton("Erase", (d, w) -> {
+                .setTitle("Factory reset " + what + "?")
+                .setMessage(watch ? "The watch's settings, faces and all saves go; it starts as it came. watchOS itself stays installed (no reinstall)."
+                        : "Its settings, installed apps and all saves go; iOS starts as new. " + systemName(os) + " itself stays installed (no reinstall).")
+                .setPositiveButton("Factory reset", (d, w) -> {
                     if (Guest.running()) {
                         Toast.makeText(this, "Close " + Guest.osName(Guest.os(this)) + " first (side bar > Saves > Save and close)",
                                 Toast.LENGTH_LONG).show();

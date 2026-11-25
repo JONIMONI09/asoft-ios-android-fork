@@ -131,6 +131,10 @@
    - **Fix 3 (`/proc/self/maps`):** Gate parsing on active bounce/trace and `break` immediately once `lo >= end`.
    - **Fix 4 (`multiVmaBounce`):** Prefer `HOST_VISIBLE | HOST_COHERENT | HOST_CACHED` over uncached WC shadow memory, use a dedicated `g_bounce_lock`, and skip scans when `g_bounce_active_count == 0`.
    - **Fix 5 (`LD_PRELOAD`):** Use a lock-free atomic FD bitset (`g_kgsl_fd_bits`) for non-KGSL `close()`/`ioctl()` calls and only inject `LD_PRELOAD` when `kgslTrace || syncLogging || kgslCacheSync` is enabled.
+5. **Save Recovery, Delete All Saves & Factory Reset UX (`Guest.java`, `ScreenActivity.java`, `MainActivity.java`):**
+   - Added `Guest.deleteSnapshot(Context, int, String)` and `Guest.deleteAllSnapshots(Context, int)` to scan and delete every qcow2 snapshot (including both quick-save slots and named saves) plus sidecar metadata files without touching the installed OS.
+   - Added a **`Recovery / Boot without save…`** button directly on `ScreenActivity`'s stopped/crash overlay offering a 3-step escalation: (1) Restart without save (cold boot), (2) Delete all saves & cold boot, and (3) Factory reset iPhone/watch (`Guest.erase`, wipes user settings/apps/saves while keeping iOS/watchOS installed with no reinstall).
+   - Added **`Delete all saves (N)`** (plus cold boot & factory reset when stopped) to `ScreenActivity`'s sidebar `Saves` dialog, and **`Manage / delete all saves…`** + clearer **`Factory reset iPhone (keep …)…`** labeling to `MainActivity`'s OS menu.
 
 
 

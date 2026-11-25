@@ -38,7 +38,9 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
     private int fbPid = -1;             // the QEMU whose framebuffer is mapped
     private long lastTry;
     private Button restart;
-    /** Under restart when the guest ended by itself: the crash report (CrashReport.show). */
+    /** Under restart when stopped: boot without save, delete all saves, or factory reset (keep OS). */
+    private Button recovery;
+    /** Under recovery when the guest ended by itself: the crash report (CrashReport.show). */
     private Button report;
     /** The pending crash record shown, and what it was read for (the os, its notice, the newest record's time). */
     private CrashReport.Record crash;
@@ -190,11 +192,15 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 placeBar();
             }
         });
+        LinearLayout stoppedActions = new LinearLayout(this);
+        stoppedActions.setOrientation(LinearLayout.VERTICAL);
+        stoppedActions.setGravity(Gravity.CENTER_HORIZONTAL);
         restart = new Button(this);
         restart.setText("Restart iOS");
         restart.setVisibility(View.GONE);
         restart.setOnClickListener(v -> {
             restart.setVisibility(View.GONE);
+            recovery.setVisibility(View.GONE);
             report.setVisibility(View.GONE);
             if (Qmp.noSpace && Guest.running()) {
                 // paused on a full disk: go on (QEMU pauses again, and says so, if there is still no room)
@@ -209,14 +215,23 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             status.setText("starting");
             GuestService.start(this);
         });
-        root.addView(restart, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        stoppedActions.addView(restart, new LinearLayout.LayoutParams(-2, -2));
+        recovery = new Button(this);
+        recovery.setText("Recovery / Boot without save…");
+        recovery.setAllCaps(false);
+        recovery.setVisibility(View.GONE);
+        recovery.setOnClickListener(v -> openRecoveryOptions());
+        LinearLayout.LayoutParams reclp = new LinearLayout.LayoutParams(-2, -2);
+        reclp.topMargin = dp(10);
+        stoppedActions.addView(recovery, reclp);
         report = new Button(this);
         report.setText("Report this crash");
         report.setVisibility(View.GONE);
         report.setOnClickListener(v -> CrashReport.show(this, crash));
-        FrameLayout.LayoutParams rlp = new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER);
-        rlp.topMargin = Math.round(64 * getResources().getDisplayMetrics().density);     // below restart
-        root.addView(report, rlp);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-2, -2);
+        rlp.topMargin = dp(10);
+        stoppedActions.addView(report, rlp);
+        root.addView(stoppedActions, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         setContentView(root);
         view.setOnTouchListener(this::onTouch);
         renderThread = new HandlerThread("render");
@@ -245,6 +260,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
         }
         if (!Guest.running() && !Guest.saving() && !closing && !"preparing".equals(Guest.state)) {
             restart.setVisibility(View.GONE);
+            recovery.setVisibility(View.GONE);
             report.setVisibility(View.GONE);
             status.setText("starting");
             GuestService.start(this);
@@ -608,8 +624,211 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 askTurnOff(quick);
             });
             box.addView(off);
+        } else {
+            TextView cold = new TextView(this);
+            cold.setText("Boot without save (cold boot)");
+            cold.setTextSize(16);
+            cold.setTextColor(0xff0a84ff);
+            cold.setPadding(0, 32, 0, 12);
+            cold.setOnClickListener(v -> {
+                dialog[0].dismiss();
+                startColdHere();
+            });
+            box.addView(cold);
+        }
+        if (!list.isEmpty()) {
+            TextView delAll = new TextView(this);
+            delAll.setText("Delete all saves (" + list.size() + ")");
+            delAll.setTextSize(16);
+            delAll.setTextColor(0xffff453a);
+            delAll.setPadding(0, 20, 0, 12);
+            delAll.setOnClickListener(v -> {
+                dialog[0].dismiss();
+                askDeleteAllSaves(list, false);
+            });
+            box.addView(delAll);
+        }
+        if (!up) {
+            int os = Guest.os(this);
+            TextView wipe = new TextView(this);
+            wipe.setText(os == Guest.WATCH ? "Factory reset watch (keep watchOS)…"
+                    : "Factory reset iPhone (keep " + Guest.osName(os) + ")…");
+            wipe.setTextSize(16);
+            wipe.setTextColor(0xffff453a);
+            wipe.setPadding(0, 12, 0, 24);
+            wipe.setOnClickListener(v -> {
+                dialog[0].dismiss();
+                askFactoryReset(true);
+            });
+            box.addView(wipe);
         }
         dialog[0] = b.show();
+    }
+
+    private void startColdHere() {
+        restart.setVisibility(View.GONE);
+        recovery.setVisibility(View.GONE);
+        report.setVisibility(View.GONE);
+        status.setText("Booting " + Guest.osName(Guest.os(this)) + " without save…");
+        GuestService.startCold(this);
+    }
+
+    /** Tiered recovery dialog shown from the stopped/crash screen when a save fails to resume. */
+    private void openRecoveryOptions() {
+        if (Guest.saving() || closing) {
+            return;
+        }
+        if (Guest.setupOwns()) {
+            toast(SetupOwner.BUSY);
+            return;
+        }
+        int os = Guest.os(this);
+        String name = Guest.osName(os);
+        new Thread(() -> {
+            java.util.List<Guest.Snap> list = Guest.snapshots(this, os);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                LinearLayout box = new LinearLayout(this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setPadding(48, 16, 48, 8);
+                TextView info = new TextView(this);
+                StringBuilder summary = new StringBuilder();
+                if (list.isEmpty()) {
+                    summary.append("No saved states found for ").append(name).append(".");
+                } else {
+                    summary.append("Found ").append(list.size()).append(" save")
+                            .append(list.size() == 1 ? "" : "s").append(":\n");
+                    for (Guest.Snap s : list) {
+                        summary.append("• ").append(s.label()).append(" (").append(s.tag)
+                                .append(", ").append(s.size).append(")\n");
+                    }
+                }
+                summary.append("\nTry step by step:\n"
+                        + "1. Boot without save (keeps saves, skips broken quick-save).\n"
+                        + "2. Delete all saves & cold boot.\n"
+                        + "3. Factory reset (wipes internal settings/apps/saves; keeps ")
+                        .append(name).append(" installed, no reinstall needed).");
+                info.setText(summary.toString());
+                info.setPadding(0, 0, 0, 20);
+                box.addView(info);
+
+                android.app.AlertDialog[] dlg = new android.app.AlertDialog[1];
+                Button coldBtn = new Button(this);
+                coldBtn.setAllCaps(false);
+                coldBtn.setText("1. Restart without save (cold boot)");
+                coldBtn.setOnClickListener(v -> {
+                    dlg[0].dismiss();
+                    startColdHere();
+                });
+                box.addView(coldBtn);
+
+                if (!list.isEmpty()) {
+                    Button delBtn = new Button(this);
+                    delBtn.setAllCaps(false);
+                    delBtn.setText("2. Delete all saves (" + list.size() + ") & cold boot");
+                    delBtn.setOnClickListener(v -> {
+                        dlg[0].dismiss();
+                        askDeleteAllSaves(list, true);
+                    });
+                    box.addView(delBtn);
+                }
+
+                Button wipeBtn = new Button(this);
+                wipeBtn.setAllCaps(false);
+                wipeBtn.setText(os == Guest.WATCH
+                        ? "3. Factory reset watch (keep watchOS)"
+                        : "3. Factory reset iPhone (keep " + name + ")");
+                wipeBtn.setOnClickListener(v -> {
+                    dlg[0].dismiss();
+                    askFactoryReset(true);
+                });
+                box.addView(wipeBtn);
+
+                android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+                scroll.addView(box);
+                dlg[0] = new android.app.AlertDialog.Builder(this)
+                        .setTitle("Recovery options — " + name)
+                        .setView(scroll)
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            });
+        }, "recovery-saves").start();
+    }
+
+    private void askDeleteAllSaves(java.util.List<Guest.Snap> list, boolean bootAfter) {
+        int os = Guest.os(this);
+        String name = Guest.osName(os);
+        StringBuilder msg = new StringBuilder();
+        msg.append("Delete all ").append(list.size()).append(" save")
+                .append(list.size() == 1 ? "" : "s").append(" for ").append(name).append("?\n\n");
+        for (Guest.Snap s : list) {
+            msg.append("• ").append(s.label()).append(" (").append(s.size).append(")\n");
+        }
+        msg.append("\nYour installed ").append(name).append(" and user disk stay intact.");
+        if (bootAfter) {
+            msg.append(" ").append(name).append(" will then start with a cold boot.");
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Delete all saves?")
+                .setMessage(msg.toString())
+                .setPositiveButton(bootAfter ? "Delete all & boot" : "Delete all", (d, w) -> {
+                    status.setText("Deleting all saves…");
+                    if (bootAfter) {
+                        restart.setVisibility(View.GONE);
+                        recovery.setVisibility(View.GONE);
+                        report.setVisibility(View.GONE);
+                    }
+                    new Thread(() -> {
+                        Guest.DeleteAllResult res = Guest.deleteAllSnapshots(this, os);
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            if (res.error != null) {
+                                toast("Deleted " + res.deleted + " of " + res.found + " saves (error: " + res.error + ")");
+                            } else {
+                                toast("Deleted all " + res.deleted + " save(s)");
+                            }
+                            if (bootAfter) {
+                                startColdHere();
+                            } else if (!Guest.running()) {
+                                status.setText(name + " stopped");
+                            }
+                        });
+                    }, "saves-delete-all").start();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void askFactoryReset(boolean bootAfter) {
+        int os = Guest.os(this);
+        boolean watch = os == Guest.WATCH;
+        String name = Guest.osName(os);
+        String what = watch ? "watchOS's watch" : name + "'s iPhone";
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Factory reset " + what + "?")
+                .setMessage((watch
+                        ? "The watch's settings, faces and all saves will be erased; watchOS itself stays installed (no reinstall)."
+                        : "The iPhone's settings, installed apps and all saves will be erased; " + name
+                        + " itself stays installed (no reinstall).")
+                        + (bootAfter ? "\n\n" + name + " will then boot fresh." : ""))
+                .setPositiveButton(bootAfter ? "Factory reset & boot" : "Factory reset", (d, w) -> {
+                    if (Guest.running()) {
+                        toast("Close " + Guest.osName(Guest.os(this)) + " first (Saves > Turn off without saving)");
+                        return;
+                    }
+                    Guest.select(this, os);
+                    Guest.erase(this, os);
+                    toast("Factory reset complete — " + name + " kept intact");
+                    if (bootAfter) {
+                        startColdHere();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void askSaveName(java.util.List<Guest.Snap> list, long free) {
@@ -669,6 +888,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 .setPositiveButton("Load", (d, w) -> {
                     status.setText("Loading \"" + snap.label() + "\"…");
                     restart.setVisibility(View.GONE);
+                    recovery.setVisibility(View.GONE);
                     report.setVisibility(View.GONE);
                     GuestService.load(this, snap.tag);
                 })
@@ -697,6 +917,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                     Guest.goBack(this, os, snap.tag);
                     status.setText("Going back to " + when(snap) + "…");
                     restart.setVisibility(View.GONE);
+                    recovery.setVisibility(View.GONE);
                     report.setVisibility(View.GONE);
                     GuestService.load(this, snap.tag);
                 })
@@ -1088,6 +1309,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                         getFilesDir().getUsableSpace() / 1e9, Guest.osName(Guest.os(this))));
                 restart.setText("Continue");
                 restart.setVisibility(View.VISIBLE);
+                recovery.setVisibility(View.GONE);
                 report.setVisibility(View.GONE);
             }
         } else if ("resuming".equals(Guest.state) || "switching".equals(Guest.state)) {
@@ -1097,6 +1319,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             String what = Guest.preparing;
             status.setText(what == null ? "starting" : what);
             restart.setVisibility(View.GONE);
+            recovery.setVisibility(View.GONE);
             report.setVisibility(View.GONE);
         } else if (!closing && status.getText().length() > 0 && fbPid == Guest.pid(this)
                 && ("running".equals(Guest.state) || "booting".equals(Guest.state))) {
@@ -1111,6 +1334,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                 if (err != null) {
                     status.setText(name + " did not start: " + err);
                     restart.setVisibility(View.VISIBLE);
+                    recovery.setVisibility(View.VISIBLE);
                     report.setVisibility(View.GONE);
                     fbPid = -1;
                     return;
@@ -1127,6 +1351,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
                     status.setText(name + " stopped" + (why.isEmpty() ? "" : ": " + why));
                 }
                 restart.setVisibility(View.VISIBLE);
+                recovery.setVisibility(View.VISIBLE);
                 report.setVisibility(cr != null ? View.VISIBLE : View.GONE);
                 if (Guest.endedInCompatMode()) {
                     compatSince = now;
@@ -1157,6 +1382,7 @@ public class ScreenActivity extends Activity implements SurfaceHolder.Callback, 
             fbPid = err == null ? pid : -1;
             status.setText(err == null ? "" : "starting: " + err);
             restart.setVisibility(View.GONE);
+            recovery.setVisibility(View.GONE);
             report.setVisibility(View.GONE);
         }
         if (fbPid == pid && attached && surfW > 0 && surfH > 0) {
