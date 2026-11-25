@@ -223,8 +223,25 @@ final class ApkUpdater {
 
     static void clearCache(Context c) {
         File dir = ShareProvider.dir(c);
-        new File(dir, APK_FILE_NAME).delete();
-        new File(dir, APK_FILE_NAME + ".part").delete();
+        long freed = 0;
+        int removed = 0;
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                String n = f.getName();
+                if (f.isFile() && (n.endsWith(".apk") || n.endsWith(".apk.part"))) {
+                    long len = f.length();
+                    if (f.delete()) {
+                        freed += len;
+                        removed++;
+                    }
+                }
+            }
+        }
+        if (removed > 0) {
+            AppLog.note(c, String.format(java.util.Locale.ROOT,
+                    "updater: cleared %d leftover APK cache file(s) (%.1f MB)", removed, freed / 1e6));
+        }
     }
 
     static VerifyResult downloadAndVerify(Context c, ReleaseAsset asset, ProgressCb cb) throws Exception {
