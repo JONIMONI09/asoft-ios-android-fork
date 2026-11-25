@@ -2683,23 +2683,6 @@ public class MainActivity extends Activity {
             requestPermissions(new String[] {android.Manifest.permission.POST_NOTIFICATIONS}, 7);
             return;
         }
-        int adbState = WirelessAdb.switchedOn(this);
-        if (adbState == 0) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Wireless debugging is not active")
-                    .setMessage("Wireless debugging is currently turned OFF on this device.\n\n"
-                            + "1. Please wait while Developer options opens.\n"
-                            + "2. Scroll to \"Wireless debugging\" and toggle it ON (requires active Wi-Fi).\n"
-                            + "3. Tap \"Pair device with pairing code\" and enter the 6-digit code in the notification.")
-                    .setPositiveButton("Open Developer options", (d, w) -> {
-                        WadbPairService.start(this);
-                        showSettings();
-                        openDeveloperOptions();
-                    })
-                    .setNegativeButton("Cancel", null)
-                    .show();
-            return;
-        }
         WadbPairService.start(this);
         showSettings();
         openDeveloperOptions();
