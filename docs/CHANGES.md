@@ -135,6 +135,9 @@
    - Added `Guest.deleteSnapshot(Context, int, String)` and `Guest.deleteAllSnapshots(Context, int)` to scan and delete every qcow2 snapshot (including both quick-save slots and named saves) plus sidecar metadata files without touching the installed OS.
    - Added a **`Recovery / Boot without save…`** button directly on `ScreenActivity`'s stopped/crash overlay offering a 3-step escalation: (1) Restart without save (cold boot), (2) Delete all saves & cold boot, and (3) Factory reset iPhone/watch (`Guest.erase`, wipes user settings/apps/saves while keeping iOS/watchOS installed with no reinstall).
    - Added **`Delete all saves (N)`** (plus cold boot & factory reset when stopped) to `ScreenActivity`'s sidebar `Saves` dialog, and **`Manage / delete all saves…`** + clearer **`Factory reset iPhone (keep …)…`** labeling to `MainActivity`'s OS menu.
+6. **Advanced Performance Tuning in 3-Dot OS Menu (`PerfConfig.java`, `PerfConfigTest.java`, `CpuPlan.java`, `Guest.java`, `Qmp.java`, `ScreenActivity.java`, `MainActivity.java`):**
+   - Added **`Advanced performance…`** inside each OS's 3-dot (`⋮`) menu with 3 presets (`Balanced Fast`, `Max Gaming`, `Stock Defaults`) and 8 documented English settings tagged by exact scope (`[Live]`, `[Next start]`, `[Next cold boot]`): vCPU count (`Auto / 2 / 4 / 6 / 8`), fast-core pinning (`cpu_capacity >= 60%`), QEMU TCG JIT cache (`tb-size` 512–1536 MiB), dedicated `virtio-blk` `iothread`, `cache=writeback` vs. `O_DIRECT`, Native-EL0 stub pool (`24 / 32 / 48`), host display frame poll cap (`Auto / 60 / 30 FPS`), and touch swipe QMP pacing (`Balanced / Responsive / Low-overhead`).
+   - Mirrors `noteRamChange()` with a clear post-save notice explaining which changes applied immediately vs. on next start or next cold boot.
 
 
 

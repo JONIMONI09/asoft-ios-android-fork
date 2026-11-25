@@ -146,7 +146,7 @@ final class Qmp {
     // afterwards (a list that froze, then a flick taken for the home gesture); at ~14 moves a second it
     // drew 43-49 frames during the same drag (APK-PLAN §6.22). A move with a down or an up queued behind
     // it is dropped: the edge carries the newest position.
-    private static final long MIN_GAP_MS = 16, MAX_GAP_MS = 66;
+    // Defaults (16 ms / 66 ms) now live in PerfConfig.liveTouchMinGapMs / liveTouchMaxGapMs.
 
     private static final class Touch {
         final boolean move;
@@ -197,12 +197,14 @@ final class Qmp {
                     } else if (head != null) {
                         long now = android.os.SystemClock.uptimeMillis();
                         long since = now - lastMove;
-                        if (since >= MAX_GAP_MS || since >= MIN_GAP_MS && Render.uploads() != framesAtMove) {
+                        long minGap = PerfConfig.liveTouchMinGapMs;
+                        long maxGap = PerfConfig.liveTouchMaxGapMs;
+                        if (since >= maxGap || since >= minGap && Render.uploads() != framesAtMove) {
                             json = touches.pollFirst().json;
                             lastMove = now;
                             framesAtMove = Render.uploads();
                         } else {
-                            wait = Math.max(1, Math.min(4, MAX_GAP_MS - since));
+                            wait = Math.max(1, Math.min(4, maxGap - since));
                         }
                     }
                     if (json == null) {
